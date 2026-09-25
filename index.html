@@ -18,7 +18,7 @@
   <meta http-equiv="Permissions-Policy" content="camera=(), microphone=(), geolocation=(self), payment=(), usb=()">
 
   <link rel="manifest" href="manifest.json">
-  <link rel="stylesheet" href="styles.css?v=5">
+  <link rel="stylesheet" href="styles.css?v=6">
 </head>
 <body>
 
@@ -106,13 +106,26 @@
         <span class="badge-count" id="count-faenas">0 faenas</span>
       </div>
 
-      <!-- Filtros del Histórico: Huerto y Operario -->
+      <!-- Filtros del Histórico: Huerto, Operario y Plagas -->
       <div class="filter-bar">
         <select id="filtro-huerto-feed" class="form-select-sm" onchange="filtrarFeedPorHuerto(this.value)">
           <option value="todos">Todos los huertos</option>
         </select>
         <select id="filtro-usuario-feed" class="form-select-sm" onchange="filtrarFeedPorUsuario(this.value)">
           <option value="todos">Todos los operarios</option>
+        </select>
+        <select id="filtro-plaga-feed" class="form-select-sm" onchange="filtrarFeedPorPlaga(this.value)">
+          <option value="todos">Todas las plagas / faenas</option>
+          <option value="con-plagas">⚠️ Solo con plagas / alertas</option>
+          <option value="tratamientos">🧪 Tratamientos fitosanitarios</option>
+          <option value="Araña roja">🕷️ Araña roja</option>
+          <option value="Mosca de la fruta">🪰 Mosca fruta / Ceratitis</option>
+          <option value="Mosca blanca">⚪ Mosca blanca</option>
+          <option value="Trip">🦟 Trip</option>
+          <option value="Cotonet">🐞 Cotonet</option>
+          <option value="Piojo rojo">🦠 Piojo rojo</option>
+          <option value="Minador">🐛 Minador</option>
+          <option value="limpio">🟢 Revisiones sin plagas</option>
         </select>
       </div>
 
@@ -257,8 +270,12 @@
                 <span class="tickmark-box">🦟 Trip</span>
               </label>
               <label class="tickmark-item">
+                <input type="checkbox" value="Mosca de la fruta" name="plagas">
+                <span class="tickmark-box">🪰 Mosca fruta / Ceratitis</span>
+              </label>
+              <label class="tickmark-item">
                 <input type="checkbox" value="Mosca blanca" name="plagas">
-                <span class="tickmark-box">🪰 Mosca blanca</span>
+                <span class="tickmark-box">⚪ Mosca blanca</span>
               </label>
               <label class="tickmark-item">
                 <input type="checkbox" value="Araña roja" name="plagas">
@@ -414,9 +431,9 @@
   <div id="toast-container" class="toast-container"></div>
 
   <!-- Scripts de la Aplicación -->
-  <script src="security.js?v=5"></script>
-  <script src="datos_huertos.js?v=5"></script>
-  <script src="app.js?v=5"></script>
+  <script src="security.js?v=6"></script>
+  <script src="datos_huertos.js?v=6"></script>
+  <script src="app.js?v=6"></script>
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {

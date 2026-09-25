@@ -325,6 +325,8 @@
       quimicoProducto: stripHtmlAndControl(input.quimicoProducto || '').substring(0, 120),
       quimicoDosis: stripHtmlAndControl(input.quimicoDosis || '').substring(0, 80),
       plagas: plagas,
+      plagasNegadas: Array.isArray(input.plagasNegadas) ? input.plagasNegadas.slice(0, 10).map(p => stripHtmlAndControl(p).substring(0, 40)) : [],
+      esTratamiento: Boolean(input.esTratamiento),
       hierba: hierba,
       notas: stripHtmlAndControl(input.notas || '').substring(0, 2000), // Max 2000 chars
       // Metadatos de seguridad y trazabilidad

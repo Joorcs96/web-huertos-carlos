@@ -2,7 +2,8 @@
 // HUERTOS CARLOS - CUADERNO DE CAMPO Y GESTIÓN DE FAENAS AGRÍCOLAS
 // ============================================================================
 
-const STORAGE_KEY = 'huertos_carlos_db_v2';
+const STORAGE_KEY = 'huertos_carlos_db_v3';
+const PREV_STORAGE_KEY = 'huertos_carlos_db_v2';
 const USER_KEY = 'huertos_carlos_active_user';
 
 // Usuarios autorizados (Carlos, Juan Carlos, Diego y equipo según el Excel)
@@ -46,7 +47,27 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 async function cargarDatos() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    let raw = localStorage.getItem(STORAGE_KEY);
+    
+    // Migración transparente desde versiones previas preservando faenas manuales creadas por el usuario
+    if (!raw && localStorage.getItem(PREV_STORAGE_KEY)) {
+      try {
+        const rawPrev = localStorage.getItem(PREV_STORAGE_KEY);
+        const parsedPrev = window.HuertoSecurity ? window.HuertoSecurity.safeJsonParse(rawPrev) : JSON.parse(rawPrev);
+        if (parsedPrev && Array.isArray(parsedPrev.faenas)) {
+          const faenasUsuario = parsedPrev.faenas.filter(f => f.id && (f.id.startsWith('f-') || f.id.startsWith('faena-custom-') || !f.id.includes('-')));
+          const baseFaenas = JSON.parse(JSON.stringify(FAENAS_INICIALES));
+          estado.parcelas = (parsedPrev.parcelas && parsedPrev.parcelas.length >= 20) ? parsedPrev.parcelas : JSON.parse(JSON.stringify(PARCELAS_INICIALES));
+          estado.faenas = [...faenasUsuario, ...baseFaenas];
+          guardarDatos();
+          console.log(`[Migración] Actualizado a ${STORAGE_KEY} con ${faenasUsuario.length} faenas de usuario y ${baseFaenas.length} faenas base.`);
+        }
+      } catch (migErr) {
+        console.warn('[Migración] Error migrando v2:', migErr);
+      }
+      raw = localStorage.getItem(STORAGE_KEY);
+    }
+
     if (raw) {
       // Usar parser seguro contra Prototype Pollution
       const parsed = window.HuertoSecurity ? window.HuertoSecurity.safeJsonParse(raw) : JSON.parse(raw);
@@ -61,7 +82,7 @@ async function cargarDatos() {
 
       if (parsed && parsed.parcelas && parsed.parcelas.length >= 20) {
         estado.parcelas = parsed.parcelas;
-        estado.faenas = parsed.faenas || FAENAS_INICIALES;
+        estado.faenas = parsed.faenas || JSON.parse(JSON.stringify(FAENAS_INICIALES));
       } else {
         estado.parcelas = JSON.parse(JSON.stringify(PARCELAS_INICIALES));
         estado.faenas = JSON.parse(JSON.stringify(FAENAS_INICIALES));
@@ -371,12 +392,18 @@ function generarTarjetaFaenaHtml(f) {
   const esc = (window.HuertoSecurity && window.HuertoSecurity.escapeHtml) ? window.HuertoSecurity.escapeHtml : s => (s || '');
   const safeId = (window.HuertoSecurity && window.HuertoSecurity.sanitizeId) ? window.HuertoSecurity.sanitizeId(f.id) : f.id;
 
-  // Tags de plagas detectadas
+  // Tags de plagas y tratamientos
   let tagsPlagasHtml = '';
-  if (f.plagas && f.plagas.length > 0) {
+  if (f.esTratamiento && f.plagas && f.plagas.length > 0) {
     f.plagas.forEach(p => {
-      tagsPlagasHtml += `<span class="tag-plaga">⚠️ ${esc(p)}</span>`;
+      tagsPlagasHtml += `<span class="tag-plaga tratamiento">🧪 Tratamiento: ${esc(p)}</span>`;
     });
+  } else if (f.plagas && f.plagas.length > 0) {
+    f.plagas.forEach(p => {
+      tagsPlagasHtml += `<span class="tag-plaga alerta">⚠️ ${esc(p)}</span>`;
+    });
+  } else if (f.plagasNegadas && f.plagasNegadas.length > 0) {
+    tagsPlagasHtml += `<span class="tag-plaga limpio">🟢 Sin plagas</span>`;
   }
 
   // Tag de estado de hierba
@@ -459,7 +486,7 @@ function generarTarjetaFaenaHtml(f) {
 }
 
 // 1. Renderizar Muro Histórico de Faenas (Cronológico clásico vertical, como estaba antes)
-function renderizarFeed(filtroHuerto, filtroUsuario) {
+function renderizarFeed(filtroHuerto, filtroUsuario, filtroPlaga) {
   const container = document.getElementById('feed-container');
   const countBadge = document.getElementById('count-faenas');
   if (!container) return;
@@ -468,6 +495,7 @@ function renderizarFeed(filtroHuerto, filtroUsuario) {
 
   const huertoSel = filtroHuerto !== undefined ? filtroHuerto : (document.getElementById('filtro-huerto-feed')?.value || 'todos');
   const usuarioSel = filtroUsuario !== undefined ? filtroUsuario : (document.getElementById('filtro-usuario-feed')?.value || 'todos');
+  const plagaSel = filtroPlaga !== undefined ? filtroPlaga : (document.getElementById('filtro-plaga-feed')?.value || 'todos');
 
   let faenasFiltradas = [...estado.faenas].sort((a, b) => {
     return new Date(`${b.fecha} ${b.hora || '12:00'}`) - new Date(`${a.fecha} ${a.hora || '12:00'}`);
@@ -478,6 +506,15 @@ function renderizarFeed(filtroHuerto, filtroUsuario) {
   }
   if (usuarioSel !== 'todos') {
     faenasFiltradas = faenasFiltradas.filter(f => f.usuarioId === usuarioSel || f.usuario === usuarioSel);
+  }
+  if (plagaSel === 'con-plagas') {
+    faenasFiltradas = faenasFiltradas.filter(f => f.plagas && f.plagas.length > 0);
+  } else if (plagaSel === 'tratamientos') {
+    faenasFiltradas = faenasFiltradas.filter(f => f.esTratamiento || (f.quimicoProducto && (f.tipoFaena?.toLowerCase().includes('turbo') || f.tipoFaena?.toLowerCase().includes('trampes') || f.tipoFaena?.toLowerCase().includes('maxina'))));
+  } else if (plagaSel === 'limpio') {
+    faenasFiltradas = faenasFiltradas.filter(f => f.plagasNegadas && f.plagasNegadas.length > 0 && (!f.plagas || f.plagas.length === 0));
+  } else if (plagaSel !== 'todos') {
+    faenasFiltradas = faenasFiltradas.filter(f => f.plagas && f.plagas.includes(plagaSel));
   }
 
   if (countBadge) {
@@ -500,12 +537,18 @@ function renderizarFeed(filtroHuerto, filtroUsuario) {
     const card = document.createElement('div');
     card.className = 'feed-card';
 
-    // Tags de plagas detectadas
+    // Tags de plagas y tratamientos
     let tagsPlagasHtml = '';
-    if (f.plagas && f.plagas.length > 0) {
+    if (f.esTratamiento && f.plagas && f.plagas.length > 0) {
       f.plagas.forEach(p => {
-        tagsPlagasHtml += `<span class="tag-plaga">⚠️ ${esc(p)}</span>`;
+        tagsPlagasHtml += `<span class="tag-plaga tratamiento">🧪 Tratamiento: ${esc(p)}</span>`;
       });
+    } else if (f.plagas && f.plagas.length > 0) {
+      f.plagas.forEach(p => {
+        tagsPlagasHtml += `<span class="tag-plaga alerta">⚠️ ${esc(p)}</span>`;
+      });
+    } else if (f.plagasNegadas && f.plagasNegadas.length > 0) {
+      tagsPlagasHtml += `<span class="tag-plaga limpio">🟢 Sin plagas (${f.plagasNegadas.map(esc).join(', ')})</span>`;
     }
 
     // Tag de estado de hierba
@@ -565,12 +608,20 @@ function renderizarFeed(filtroHuerto, filtroUsuario) {
 
 window.filtrarFeedPorHuerto = function(huertoId) {
   const usuario = document.getElementById('filtro-usuario-feed')?.value || 'todos';
-  renderizarFeed(huertoId, usuario);
+  const plaga = document.getElementById('filtro-plaga-feed')?.value || 'todos';
+  renderizarFeed(huertoId, usuario, plaga);
 };
 
 window.filtrarFeedPorUsuario = function(usuarioId) {
   const huerto = document.getElementById('filtro-huerto-feed')?.value || 'todos';
-  renderizarFeed(huerto, usuarioId);
+  const plaga = document.getElementById('filtro-plaga-feed')?.value || 'todos';
+  renderizarFeed(huerto, usuarioId, plaga);
+};
+
+window.filtrarFeedPorPlaga = function(plagaId) {
+  const huerto = document.getElementById('filtro-huerto-feed')?.value || 'todos';
+  const usuario = document.getElementById('filtro-usuario-feed')?.value || 'todos';
+  renderizarFeed(huerto, usuario, plagaId);
 };
 
 // 1b. Renderizar Trabajo Diario (Tablero DevOps Kanban 3 Columnas)
@@ -934,21 +985,31 @@ function renderizarSemaforo() {
 
   container.innerHTML = '';
   estado.parcelas.forEach(p => {
-    const faenas = estado.faenas.filter(f => f.parcelaId === p.id);
+    const faenas = [...estado.faenas]
+      .filter(f => f.parcelaId === p.id)
+      .sort((a, b) => new Date(`${b.fecha} ${b.hora || '12:00'}`) - new Date(`${a.fecha} ${a.hora || '12:00'}`));
     const ultima = faenas[0];
+    const ultimaPlagaReg = faenas.find(f => (f.plagas && f.plagas.length > 0) || (f.plagasNegadas && f.plagasNegadas.length > 0) || f.esTratamiento);
 
     let estadoPlaga = 'Sin plagas';
     let clasePlaga = 'var(--primary-light)';
     let estadoHierba = 'Limpio';
 
-    if (ultima) {
-      if (ultima.plagas && ultima.plagas.length > 0) {
-        estadoPlaga = `Alerta: ${ultima.plagas.map(esc).join(', ')}`;
+    if (ultimaPlagaReg) {
+      if (ultimaPlagaReg.esTratamiento && ultimaPlagaReg.plagas && ultimaPlagaReg.plagas.length > 0) {
+        estadoPlaga = `Tratado: ${ultimaPlagaReg.plagas.map(esc).join(', ')}`;
+        clasePlaga = '#93c5fd';
+      } else if (ultimaPlagaReg.plagas && ultimaPlagaReg.plagas.length > 0) {
+        estadoPlaga = `⚠️ Alerta: ${ultimaPlagaReg.plagas.map(esc).join(', ')}`;
         clasePlaga = '#fca5a5';
+      } else if (ultimaPlagaReg.plagasNegadas && ultimaPlagaReg.plagasNegadas.length > 0) {
+        estadoPlaga = `🟢 Limpio (${ultimaPlagaReg.plagasNegadas.map(esc).join(', ')})`;
+        clasePlaga = 'var(--primary-light)';
       }
-      if (ultima.hierba) {
-        estadoHierba = ultima.hierba;
-      }
+    }
+
+    if (ultima && ultima.hierba) {
+      estadoHierba = ultima.hierba;
     }
 
     const card = document.createElement('div');
@@ -1029,6 +1090,14 @@ window.guardarNuevaFaena = function(e) {
     const ahora = new Date();
     const hora = `${String(ahora.getHours()).padStart(2, '0')}:${String(ahora.getMinutes()).padStart(2, '0')}`;
 
+    const esTratamiento = Boolean(
+      producto ||
+      tipoFaenaSeleccionada.toLowerCase().includes('tratamiento') ||
+      tipoFaenaSeleccionada.toLowerCase().includes('turbo') ||
+      tipoFaenaSeleccionada.toLowerCase().includes('trampes') ||
+      tipoFaenaSeleccionada.toLowerCase().includes('maxina')
+    );
+
     const rawFaena = {
       id: 'f-' + Date.now(),
       fecha: fecha,
@@ -1042,6 +1111,7 @@ window.guardarNuevaFaena = function(e) {
       quimicoProducto: producto,
       quimicoDosis: dosis,
       plagas: plagas,
+      esTratamiento: esTratamiento,
       hierba: hierba,
       notas: notas
     };
@@ -1109,7 +1179,9 @@ window.verDetalleParcela = function(parcelaId) {
           <span style="color:var(--text-muted); font-size:0.75rem;">${esc(formatFecha(f.fecha))} · ${esc(f.usuario)}</span>
         </div>
         ${f.quimicoProducto ? `<div style="font-size:0.8rem; color:var(--citrus-light); margin-top:2px;">🧪 ${esc(f.quimicoProducto)} (${esc(f.quimicoDosis)})</div>` : ''}
-        ${f.plagas && f.plagas.length ? `<div style="font-size:0.75rem; color:#fca5a5; margin-top:2px;">🐛 Plagas: ${f.plagas.map(esc).join(', ')}</div>` : ''}
+        ${f.esTratamiento && f.plagas && f.plagas.length ? `<div style="font-size:0.75rem; color:#93c5fd; margin-top:2px;">🧪 Tratamiento plagas: ${f.plagas.map(esc).join(', ')}</div>` : ''}
+        ${!f.esTratamiento && f.plagas && f.plagas.length ? `<div style="font-size:0.75rem; color:#fca5a5; margin-top:2px;">⚠️ Plagas detectadas: ${f.plagas.map(esc).join(', ')}</div>` : ''}
+        ${f.plagasNegadas && f.plagasNegadas.length && (!f.plagas || !f.plagas.length) ? `<div style="font-size:0.75rem; color:var(--primary-light); margin-top:2px;">🟢 Revisión sin plagas (${f.plagasNegadas.map(esc).join(', ')})</div>` : ''}
         ${f.notas ? `<div style="font-size:0.8rem; color:var(--text-muted); margin-top:4px;">"${esc(f.notas)}"</div>` : ''}
       </div>
     `).join('');

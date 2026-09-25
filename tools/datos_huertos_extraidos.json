@@ -1,4 +1,4 @@
-window.DATOS_INICIALES_CARLOS = {
+{
   "parcelas": [
     {
       "id": "p-oliveres",
@@ -21344,4 +21344,4 @@ window.DATOS_INICIALES_CARLOS = {
       "notas": "Orris: Els arbres que estàn bé, estàn molt bé, molt verds i és  veuen frutes. Però pareix que els arbres q estaven un poc pitjor s'estàn ficant molt grocs, no oer Texas sinó fallo de clorofil·la, phytophtora? Revisar el reg I acabar de acapolar arbres. No se topeta javalex. Primerenques: Control ceratitis.  Sols les trampes arruf costat cañes pasen umbral. Y poc una trampa 2 y una 3. El resto en torno a 0,5.  No se havia limpiat desde el tratament.  Pareis que va be.  Vam partir de mes de 20."
     }
   ]
-};
+}
