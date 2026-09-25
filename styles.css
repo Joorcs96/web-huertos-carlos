@@ -1188,8 +1188,133 @@ body {
     gap: 0.25rem;
   }
 
-  .btn-status {
-    padding: 0.4rem 0.15rem;
-    font-size: 0.68rem;
-  }
+}
+
+/* ==========================================================================
+   CIBERSEGURIDAD, PROTECCIÓN DE DATOS Y PRIVACIDAD EN CAMPO
+   ========================================================================== */
+.security-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: rgba(34, 197, 94, 0.12);
+  border: 1px solid rgba(34, 197, 94, 0.3);
+  padding: 0.25rem 0.65rem;
+  border-radius: var(--radius-full);
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--primary-light);
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.security-badge:hover {
+  background: rgba(34, 197, 94, 0.2);
+  border-color: var(--primary);
+}
+
+.security-dot {
+  width: 7px;
+  height: 7px;
+  background-color: var(--primary-light);
+  border-radius: 50%;
+  box-shadow: 0 0 6px var(--primary-light);
+  display: inline-block;
+  animation: pulse-secure 2.5s infinite;
+}
+
+@keyframes pulse-secure {
+  0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.7); }
+  70% { transform: scale(1.05); box-shadow: 0 0 0 6px rgba(74, 222, 128, 0); }
+  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(74, 222, 128, 0); }
+}
+
+.security-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: 1.25rem;
+  margin-top: 1.5rem;
+}
+
+.security-status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.75rem;
+  margin: 1rem 0;
+}
+
+.security-item {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 0.85rem;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.security-item-icon {
+  font-size: 1.35rem;
+  line-height: 1;
+}
+
+.security-item-info h4 {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--text-main);
+  margin-bottom: 0.15rem;
+}
+
+.security-item-info p {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  line-height: 1.3;
+}
+
+.security-item-badge {
+  display: inline-block;
+  margin-top: 0.4rem;
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+  background: rgba(34, 197, 94, 0.15);
+  color: var(--primary-light);
+}
+
+.modal-pin-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  width: 90%;
+  max-width: 360px;
+  padding: 1.5rem;
+  text-align: center;
+  box-shadow: var(--shadow-lg);
+}
+
+.pin-inputs-wrap {
+  display: flex;
+  justify-content: center;
+  gap: 0.5rem;
+  margin: 1.25rem 0;
+}
+
+.pin-digit-input {
+  width: 48px;
+  height: 56px;
+  background: var(--bg-main);
+  border: 2px solid var(--border-color);
+  border-radius: var(--radius-md);
+  font-size: 1.5rem;
+  text-align: center;
+  color: var(--primary-light);
+  font-weight: bold;
+}
+
+.pin-digit-input:focus {
+  border-color: var(--primary);
+  outline: none;
+  box-shadow: 0 0 10px var(--primary-glow);
 }

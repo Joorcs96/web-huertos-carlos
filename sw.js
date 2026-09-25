@@ -1,11 +1,14 @@
-const CACHE_NAME = 'huerto-carlos-v2';
+const CACHE_NAME = 'huerto-carlos-v3';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
   './styles.css',
-  './app.js',
+  './security.js',
   './datos_huertos.js',
-  './manifest.json'
+  './app.js',
+  './manifest.json',
+  './icon-192.png',
+  './icon-512.png'
 ];
 
 self.addEventListener('install', (event) => {
@@ -27,15 +30,21 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-  // Solo cachear peticiones GET dentro del mismo origen
+  // Solo procesar peticiones GET dentro del mismo origen para prevenir fugas y envenenamiento de caché
   if (event.request.method !== 'GET') return;
+
+  const requestUrl = new URL(event.request.url);
+  if (requestUrl.origin !== location.origin) {
+    // Si la petición va a otro origen, dejar que el navegador la gestione bajo directivas CSP
+    return;
+  }
 
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
       if (cachedResponse) {
         // Devolver recurso cacheado y actualizar cache en segundo plano
         fetch(event.request).then((networkResponse) => {
-          if (networkResponse && networkResponse.status === 200) {
+          if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
             caches.open(CACHE_NAME).then((cache) => cache.put(event.request, networkResponse));
           }
         }).catch(() => {});

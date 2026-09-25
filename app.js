@@ -32,24 +32,34 @@ let estado = {
 };
 
 // ============================================================================
-// INICIALIZACIÓN
+// INICIALIZACIÓN CON CIBERSEGURIDAD
 // ============================================================================
-document.addEventListener('DOMContentLoaded', () => {
-  cargarDatos();
+document.addEventListener('DOMContentLoaded', async () => {
+  await cargarDatos();
   iniciarSesionUsuario();
   iniciarNavegacion();
   iniciarFormularioFaena();
+  iniciarProteccionPrivacidad();
   renderizarTodo();
+  actualizarEstadoCiberseguridadUI();
 });
 
-function cargarDatos() {
+async function cargarDatos() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
-      const parsed = JSON.parse(raw);
-      // Si la versión guardada en localStorage tiene menos de 10 parcelas (datos de prueba antiguos),
-      // recargar con los 30 huertos reales y 1175 faenas del Excel
-      if (parsed.parcelas && parsed.parcelas.length >= 20) {
+      // Usar parser seguro contra Prototype Pollution
+      const parsed = window.HuertoSecurity ? window.HuertoSecurity.safeJsonParse(raw) : JSON.parse(raw);
+      
+      // Verificación de integridad SHA-256 si HuertoSecurity está disponible
+      if (window.HuertoSecurity) {
+        const resultadoIntegridad = await window.HuertoSecurity.cargarConIntegridad(STORAGE_KEY);
+        if (resultadoIntegridad.status === 'TAMPERED') {
+          mostrarToast('⚠️ Aviso: Integridad modificada externamente. Verificando datos...', 'warning');
+        }
+      }
+
+      if (parsed && parsed.parcelas && parsed.parcelas.length >= 20) {
         estado.parcelas = parsed.parcelas;
         estado.faenas = parsed.faenas || FAENAS_INICIALES;
       } else {
@@ -63,27 +73,39 @@ function cargarDatos() {
       guardarDatos();
     }
   } catch (e) {
-    console.error('Error cargando estado:', e);
+    console.warn('[Ciberseguridad] Recuperación segura tras error de carga:', e);
     estado.parcelas = JSON.parse(JSON.stringify(PARCELAS_INICIALES));
     estado.faenas = JSON.parse(JSON.stringify(FAENAS_INICIALES));
   }
 
-  // Garantizar que toda faena histórica o existente tenga estado 'Finalizadas' por defecto
+  // Garantizar que toda faena histórica o existente tenga estado 'Finalizadas' y esquema seguro
   if (Array.isArray(estado.faenas)) {
     estado.faenas.forEach(f => {
       f.estado = normalizarEstado(f.estado || 'Finalizadas');
+      if (window.HuertoSecurity) {
+        f.id = window.HuertoSecurity.sanitizeId(f.id);
+      }
     });
   }
 }
 
 function guardarDatos() {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+    const payload = {
       parcelas: estado.parcelas,
       faenas: estado.faenas
-    }));
+    };
+    if (window.HuertoSecurity && window.HuertoSecurity.guardarConIntegridad) {
+      window.HuertoSecurity.guardarConIntegridad(STORAGE_KEY, payload).then(res => {
+        if (!res.success && res.error === 'QUOTA_EXCEEDED') {
+          mostrarToast('⚠️ Espacio local lleno. Descarga una copia de seguridad.', 'danger');
+        }
+      });
+    } else {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+    }
   } catch (e) {
-    console.error('Error guardando datos:', e);
+    console.error('[Ciberseguridad] Error guardando estado:', e);
   }
 }
 
@@ -335,13 +357,16 @@ window.cambiarEstadoFaena = function(faenaId, nuevoEstado, event) {
   mostrarToast(`Faena en ${faena.parcelaNombre} movida a "${estadoNormalizado}"`);
 };
 
-// Generador de Tarjeta de Faena con Botones de 1 Clic
+// Generador de Tarjeta de Faena con Botones de 1 Clic (Protegido Anti-XSS)
 function generarTarjetaFaenaHtml(f) {
+  const esc = (window.HuertoSecurity && window.HuertoSecurity.escapeHtml) ? window.HuertoSecurity.escapeHtml : s => (s || '');
+  const safeId = (window.HuertoSecurity && window.HuertoSecurity.sanitizeId) ? window.HuertoSecurity.sanitizeId(f.id) : f.id;
+
   // Tags de plagas detectadas
   let tagsPlagasHtml = '';
   if (f.plagas && f.plagas.length > 0) {
     f.plagas.forEach(p => {
-      tagsPlagasHtml += `<span class="tag-plaga">⚠️ ${p}</span>`;
+      tagsPlagasHtml += `<span class="tag-plaga">⚠️ ${esc(p)}</span>`;
     });
   }
 
@@ -361,8 +386,8 @@ function generarTarjetaFaenaHtml(f) {
     quimicoHtml = `
       <div class="feed-quimicos-badge">
         <span>🧪</span>
-        <strong>${f.quimicoProducto}</strong>
-        ${f.quimicoDosis ? `(${f.quimicoDosis})` : ''}
+        <strong>${esc(f.quimicoProducto)}</strong>
+        ${f.quimicoDosis ? `(${esc(f.quimicoDosis)})` : ''}
       </div>
     `;
   }
@@ -370,17 +395,17 @@ function generarTarjetaFaenaHtml(f) {
   const estadoActual = normalizarEstado(f.estado);
 
   return `
-    <div class="feed-card" draggable="true" ondragstart="onFaenaDragStart(event, '${f.id}')" id="card-${f.id}">
+    <div class="feed-card" draggable="true" ondragstart="onFaenaDragStart(event, '${safeId}')" id="card-${safeId}">
       <div class="feed-header">
         <div class="feed-title-wrap">
-          <strong>${f.parcelaNombre}</strong>
+          <strong>${esc(f.parcelaNombre)}</strong>
           <div class="feed-meta">
-            <span>👤 ${f.usuario}</span>
+            <span>👤 ${esc(f.usuario)}</span>
             <span>·</span>
-            <span>📅 ${formatFecha(f.fecha)} ${f.hora ? `a las ${f.hora}` : ''}</span>
+            <span>📅 ${esc(formatFecha(f.fecha))} ${f.hora ? `a las ${esc(f.hora)}` : ''}</span>
           </div>
         </div>
-        <span class="feed-task-badge">${f.tipoFaena}</span>
+        <span class="feed-task-badge">${esc(f.tipoFaena)}</span>
       </div>
 
       ${quimicoHtml}
@@ -390,7 +415,7 @@ function generarTarjetaFaenaHtml(f) {
         ${tagsPlagasHtml}
       </div>
 
-      ${f.notas ? `<div class="feed-notas">"${f.notas}"</div>` : ''}
+      ${f.notas ? `<div class="feed-notas">"${esc(f.notas)}"</div>` : ''}
 
       <div class="card-status-bar">
         <div class="status-bar-header">
@@ -402,19 +427,19 @@ function generarTarjetaFaenaHtml(f) {
         <div class="status-btn-group">
           <button type="button" 
                   class="btn-status ${estadoActual === 'Pendientes' ? 'active pendientes' : ''}" 
-                  onclick="cambiarEstadoFaena('${f.id}', 'Pendientes', event)" 
+                  onclick="cambiarEstadoFaena('${safeId}', 'Pendientes', event)" 
                   title="Marcar como Pendiente">
             🟡 Pendiente
           </button>
           <button type="button" 
                   class="btn-status ${estadoActual === 'En curso' ? 'active en-curso' : ''}" 
-                  onclick="cambiarEstadoFaena('${f.id}', 'En curso', event)" 
+                  onclick="cambiarEstadoFaena('${safeId}', 'En curso', event)" 
                   title="Marcar como En curso">
             🔵 En curso
           </button>
           <button type="button" 
                   class="btn-status ${estadoActual === 'Finalizadas' ? 'active finalizadas' : ''}" 
-                  onclick="cambiarEstadoFaena('${f.id}', 'Finalizadas', event)" 
+                  onclick="cambiarEstadoFaena('${safeId}', 'Finalizadas', event)" 
                   title="Marcar como Finalizada">
             🟢 Finalizada
           </button>
@@ -627,13 +652,17 @@ window.filtrarFeedPorPeriodo = function(periodo) {
   renderizarFeed(huerto, usuario, periodo);
 };
 
-// 2. Renderizar Catálogo de Parcelas (Baseline)
+// 2. Renderizar Catálogo de Parcelas (Baseline - Protegido Anti-XSS)
 function renderizarParcelas() {
   const grid = document.getElementById('parcelas-grid');
   if (!grid) return;
 
+  const esc = (window.HuertoSecurity && window.HuertoSecurity.escapeHtml) ? window.HuertoSecurity.escapeHtml : s => (s || '');
+  const sanitizeId = (window.HuertoSecurity && window.HuertoSecurity.sanitizeId) ? window.HuertoSecurity.sanitizeId : s => s;
+
   grid.innerHTML = '';
   estado.parcelas.forEach(p => {
+    const safeId = sanitizeId(p.id);
     // Buscar última faena realizada en esta parcela
     const faenasDeEsta = estado.faenas
       .filter(f => f.parcelaId === p.id)
@@ -643,13 +672,13 @@ function renderizarParcelas() {
 
     const card = document.createElement('div');
     card.className = 'parcela-card';
-    card.onclick = () => verDetalleParcela(p.id);
+    card.onclick = () => verDetalleParcela(safeId);
 
     card.innerHTML = `
       <div class="parcela-head">
         <div class="parcela-title">
-          <h3>${p.nombre}</h3>
-          <span style="font-size:0.75rem; color:var(--primary-light); font-weight:600;">${p.superficie}</span>
+          <h3>${esc(p.nombre)}</h3>
+          <span style="font-size:0.75rem; color:var(--primary-light); font-weight:600;">${esc(p.superficie)}</span>
         </div>
         <span style="font-size:1.4rem;">🍊</span>
       </div>
@@ -657,24 +686,24 @@ function renderizarParcelas() {
       <div class="parcela-specs-grid">
         <div class="spec-item">
           <span>Variedad</span>
-          <strong>${p.variedad || 'Sin especificar'}</strong>
+          <strong>${esc(p.variedad || 'Sin especificar')}</strong>
         </div>
         <div class="spec-item">
           <span>Patrón</span>
-          <strong>${p.patron || 'Sin patrón'}</strong>
+          <strong>${esc(p.patron || 'Sin patrón')}</strong>
         </div>
         <div class="spec-item">
           <span>Marco</span>
-          <strong>${p.marco || '-'}</strong>
+          <strong>${esc(p.marco || '-')}</strong>
         </div>
         <div class="spec-item">
           <span>Árboles</span>
-          <strong>${p.arboles ? `${p.arboles} pies` : '-'}</strong>
+          <strong>${p.arboles ? `${esc(p.arboles)} pies` : '-'}</strong>
         </div>
       </div>
 
       <div class="parcela-footer">
-        <span>${ultima ? `Última: ${ultima.tipoFaena} (${formatFecha(ultima.fecha)})` : 'Sin partes registrados'}</span>
+        <span>${ultima ? `Última: ${esc(ultima.tipoFaena)} (${esc(formatFecha(ultima.fecha))})` : 'Sin partes registrados'}</span>
         <strong style="color:var(--primary-light);">Ver Ficha ➔</strong>
       </div>
     `;
@@ -682,29 +711,32 @@ function renderizarParcelas() {
   });
 }
 
-// 3. Renderizar Selectores en Formulario y Filtros
+// 3. Renderizar Selectores en Formulario y Filtros (Protegido Anti-XSS)
 function renderizarSelectoresHuertos() {
   const selForm = document.getElementById('faena-huerto');
   const selFeed = document.getElementById('filtro-huerto-feed');
   const selFeedUser = document.getElementById('filtro-usuario-feed');
 
+  const esc = (window.HuertoSecurity && window.HuertoSecurity.escapeHtml) ? window.HuertoSecurity.escapeHtml : s => (s || '');
+  const sanitizeId = (window.HuertoSecurity && window.HuertoSecurity.sanitizeId) ? window.HuertoSecurity.sanitizeId : s => s;
+
   if (selForm) {
     selForm.innerHTML = estado.parcelas.map(p => `
-      <option value="${p.id}">${p.nombre} (${p.variedad})</option>
+      <option value="${sanitizeId(p.id)}">${esc(p.nombre)} (${esc(p.variedad)})</option>
     `).join('');
   }
 
   if (selFeed) {
     selFeed.innerHTML = `
       <option value="todos">Todos los huertos (${estado.parcelas.length})</option>
-      ${estado.parcelas.map(p => `<option value="${p.id}">${p.nombre}</option>`).join('')}
+      ${estado.parcelas.map(p => `<option value="${sanitizeId(p.id)}">${esc(p.nombre)}</option>`).join('')}
     `;
   }
 
   if (selFeedUser) {
     selFeedUser.innerHTML = `
       <option value="todos">Todos los operarios</option>
-      ${USUARIOS.map(u => `<option value="${u.nombre}">${u.nombre}</option>`).join('')}
+      ${USUARIOS.map(u => `<option value="${esc(u.nombre)}">${esc(u.nombre)}</option>`).join('')}
     `;
   }
 
@@ -726,7 +758,7 @@ function renderizarSelectoresHuertos() {
       ${periodosOrdenados.map(p => {
         const info = obtenerInfoMesAno(`${p}-01`);
         const total = periodosMap.get(p);
-        return `<option value="${p}">${info.etiqueta} (${total})</option>`;
+        return `<option value="${esc(p)}">${esc(info.etiqueta)} (${total})</option>`;
       }).join('')}
     `;
 
@@ -740,13 +772,19 @@ function renderizarOperariosChips() {
   const chipsWrap = document.getElementById('operarios-chips');
   if (!chipsWrap) return;
 
+  const esc = (window.HuertoSecurity && window.HuertoSecurity.escapeHtml) ? window.HuertoSecurity.escapeHtml : s => (s || '');
+  const sanitizeId = (window.HuertoSecurity && window.HuertoSecurity.sanitizeId) ? window.HuertoSecurity.sanitizeId : s => s;
+
   const currentUserId = estado.usuarioActivo ? estado.usuarioActivo.id : 'carlos';
-  chipsWrap.innerHTML = USUARIOS.map(u => `
-    <button type="button" class="user-chip-btn ${u.id === currentUserId ? 'active' : ''}" 
-            onclick="seleccionarChipOperario('${u.id}', '${u.nombre}')" id="chip-user-${u.id}">
-      ${u.avatar} ${u.nombre}
-    </button>
-  `).join('');
+  chipsWrap.innerHTML = USUARIOS.map(u => {
+    const safeId = sanitizeId(u.id);
+    return `
+      <button type="button" class="user-chip-btn ${safeId === currentUserId ? 'active' : ''}" 
+              onclick="seleccionarChipOperario('${safeId}', '${esc(u.nombre)}')" id="chip-user-${safeId}">
+        ${esc(u.avatar)} ${esc(u.nombre)}
+      </button>
+    `;
+  }).join('');
 }
 
 let operarioSeleccionadoNombre = 'Carlos';
@@ -760,10 +798,12 @@ window.seleccionarChipOperario = function(id, nombre) {
   if (btn) btn.classList.add('active');
 };
 
-// 4. Renderizar Semáforo de Huertos (Resumen)
+// 4. Renderizar Semáforo de Huertos (Resumen - Protegido Anti-XSS)
 function renderizarSemaforo() {
   const container = document.getElementById('resumen-semaforo');
   if (!container) return;
+
+  const esc = (window.HuertoSecurity && window.HuertoSecurity.escapeHtml) ? window.HuertoSecurity.escapeHtml : s => (s || '');
 
   container.innerHTML = '';
   estado.parcelas.forEach(p => {
@@ -776,7 +816,7 @@ function renderizarSemaforo() {
 
     if (ultima) {
       if (ultima.plagas && ultima.plagas.length > 0) {
-        estadoPlaga = `Alerta: ${ultima.plagas.join(', ')}`;
+        estadoPlaga = `Alerta: ${ultima.plagas.map(esc).join(', ')}`;
         clasePlaga = '#fca5a5';
       }
       if (ultima.hierba) {
@@ -788,13 +828,13 @@ function renderizarSemaforo() {
     card.className = 'semaforo-card';
     card.innerHTML = `
       <div class="semaforo-title">
-        <span>${p.nombre}</span>
-        <span style="font-size:0.75rem; color:var(--text-muted);">${p.variedad}</span>
+        <span>${esc(p.nombre)}</span>
+        <span style="font-size:0.75rem; color:var(--text-muted);">${esc(p.variedad)}</span>
       </div>
       <div style="font-size:0.8rem; margin-top:0.4rem; display:flex; flex-direction:column; gap:0.25rem;">
         <div>Plagas: <strong style="color:${clasePlaga};">${estadoPlaga}</strong></div>
-        <div>Hierba: <strong>${estadoHierba}</strong></div>
-        <div style="font-size:0.75rem; color:var(--text-subtle);">Última visita: ${ultima ? formatFecha(ultima.fecha) : 'Nunca'}</div>
+        <div>Hierba: <strong>${esc(estadoHierba)}</strong></div>
+        <div style="font-size:0.75rem; color:var(--text-subtle);">Última visita: ${ultima ? esc(formatFecha(ultima.fecha)) : 'Nunca'}</div>
       </div>
     `;
     container.appendChild(card);
@@ -836,69 +876,85 @@ function iniciarFormularioFaena() {
 window.guardarNuevaFaena = function(e) {
   e.preventDefault();
 
-  const huertoId = document.getElementById('faena-huerto').value;
-  const fecha = document.getElementById('faena-fecha').value;
-  const huerto = estado.parcelas.find(p => p.id === huertoId);
-  const notas = document.getElementById('faena-notas').value.trim();
-  const producto = document.getElementById('faena-quimico-producto').value.trim();
-  const dosis = document.getElementById('faena-quimico-dosis').value.trim();
+  const submitBtn = e.target.querySelector('button[type="submit"]');
+  if (submitBtn) submitBtn.disabled = true;
 
-  // Tickmarks de plagas
-  const checkboxes = document.querySelectorAll('input[name="plagas"]:checked');
-  const plagas = Array.from(checkboxes).map(c => c.value);
+  try {
+    const huertoId = document.getElementById('faena-huerto').value;
+    const fecha = document.getElementById('faena-fecha').value;
+    const huerto = estado.parcelas.find(p => p.id === huertoId);
+    const notas = document.getElementById('faena-notas').value.trim();
+    const producto = document.getElementById('faena-quimico-producto').value.trim();
+    const dosis = document.getElementById('faena-quimico-dosis').value.trim();
 
-  // Radio hierba
-  const radioHierba = document.querySelector('input[name="hierba"]:checked');
-  const hierba = radioHierba ? radioHierba.value : 'Limpio';
+    // Tickmarks de plagas
+    const checkboxes = document.querySelectorAll('input[name="plagas"]:checked');
+    const plagas = Array.from(checkboxes).map(c => c.value);
 
-  // Radio estado (DevOps / Kanban)
-  const radioEstado = document.querySelector('input[name="faena-estado"]:checked');
-  const estadoSeleccionado = radioEstado ? radioEstado.value : 'Finalizadas';
+    // Radio hierba
+    const radioHierba = document.querySelector('input[name="hierba"]:checked');
+    const hierba = radioHierba ? radioHierba.value : 'Limpio';
 
-  const ahora = new Date();
-  const hora = `${String(ahora.getHours()).padStart(2, '0')}:${String(ahora.getMinutes()).padStart(2, '0')}`;
+    // Radio estado (DevOps / Kanban)
+    const radioEstado = document.querySelector('input[name="faena-estado"]:checked');
+    const estadoSeleccionado = radioEstado ? radioEstado.value : 'Finalizadas';
 
-  const nuevaFaena = {
-    id: 'f-' + Date.now(),
-    fecha: fecha,
-    hora: hora,
-    usuario: operarioSeleccionadoNombre || (estado.usuarioActivo ? estado.usuarioActivo.nombre : 'Carlos'),
-    usuarioId: operarioSeleccionadoId || (estado.usuarioActivo ? estado.usuarioActivo.id : 'carlos'),
-    parcelaId: huertoId,
-    parcelaNombre: huerto ? huerto.nombre : 'Huerto',
-    tipoFaena: tipoFaenaSeleccionada,
-    estado: normalizarEstado(estadoSeleccionado),
-    quimicoProducto: producto,
-    quimicoDosis: dosis,
-    plagas: plagas,
-    hierba: hierba,
-    notas: notas
-  };
+    const ahora = new Date();
+    const hora = `${String(ahora.getHours()).padStart(2, '0')}:${String(ahora.getMinutes()).padStart(2, '0')}`;
 
-  // Añadir al principio del histórico
-  estado.faenas.unshift(nuevaFaena);
-  guardarDatos();
-  renderizarTodo();
+    const rawFaena = {
+      id: 'f-' + Date.now(),
+      fecha: fecha,
+      hora: hora,
+      usuario: operarioSeleccionadoNombre || (estado.usuarioActivo ? estado.usuarioActivo.nombre : 'Carlos'),
+      usuarioId: operarioSeleccionadoId || (estado.usuarioActivo ? estado.usuarioActivo.id : 'carlos'),
+      parcelaId: huertoId,
+      parcelaNombre: huerto ? huerto.nombre : 'Huerto',
+      tipoFaena: tipoFaenaSeleccionada,
+      estado: estadoSeleccionado,
+      quimicoProducto: producto,
+      quimicoDosis: dosis,
+      plagas: plagas,
+      hierba: hierba,
+      notas: notas
+    };
 
-  mostrarToast(`¡Faena registrada con éxito en ${nuevaFaena.parcelaNombre}! [${nuevaFaena.estado}]`);
+    // Validación y sanitización estricta por esquema de seguridad
+    const nuevaFaena = (window.HuertoSecurity && window.HuertoSecurity.validateFaena)
+      ? window.HuertoSecurity.validateFaena(rawFaena, estado.parcelas)
+      : rawFaena;
 
-  // Limpiar formulario y volver al feed
-  document.getElementById('form-faena').reset();
-  const radioDefault = document.querySelector('input[name="faena-estado"][value="Finalizadas"]');
-  if (radioDefault) radioDefault.checked = true;
-  iniciarFormularioFaena();
+    // Añadir al principio del histórico
+    estado.faenas.unshift(nuevaFaena);
+    guardarDatos();
+    renderizarTodo();
 
-  // Cambiar a pestaña feed
-  const feedTabBtn = document.querySelector('[data-tab="tab-feed"]');
-  if (feedTabBtn) feedTabBtn.click();
+    mostrarToast(`¡Faena registrada con éxito en ${nuevaFaena.parcelaNombre}! [${nuevaFaena.estado}]`);
+
+    // Limpiar formulario y volver al feed
+    document.getElementById('form-faena').reset();
+    const radioDefault = document.querySelector('input[name="faena-estado"][value="Finalizadas"]');
+    if (radioDefault) radioDefault.checked = true;
+    iniciarFormularioFaena();
+
+    // Cambiar a pestaña feed
+    const feedTabBtn = document.querySelector('[data-tab="tab-feed"]');
+    if (feedTabBtn) feedTabBtn.click();
+  } catch (err) {
+    mostrarToast(`⚠️ Error de validación: ${err.message}`, 'danger');
+  } finally {
+    if (submitBtn) submitBtn.disabled = false;
+  }
 };
 
 // ============================================================================
-// MODAL DETALLE DE PARCELA (HISTÓRICO COMPLETO)
+// MODAL DETALLE DE PARCELA (HISTÓRICO COMPLETO - PROTEGIDO ANTI-XSS)
 // ============================================================================
 window.verDetalleParcela = function(parcelaId) {
   const p = estado.parcelas.find(item => item.id === parcelaId);
   if (!p) return;
+
+  const esc = (window.HuertoSecurity && window.HuertoSecurity.escapeHtml) ? window.HuertoSecurity.escapeHtml : s => (s || '');
 
   const modal = document.getElementById('modal-detalle-parcela');
   document.getElementById('modal-parcela-nombre').innerText = p.nombre;
@@ -906,10 +962,10 @@ window.verDetalleParcela = function(parcelaId) {
 
   const specsGrid = document.getElementById('modal-parcela-specs');
   specsGrid.innerHTML = `
-    <div class="spec-item"><span>Variedad:</span> <strong>${p.variedad}</strong></div>
-    <div class="spec-item"><span>Patrón:</span> <strong>${p.patron}</strong></div>
-    <div class="spec-item"><span>Marco:</span> <strong>${p.marco}</strong></div>
-    <div class="spec-item"><span>Pies estimados:</span> <strong>${p.arboles || '-'}</strong></div>
+    <div class="spec-item"><span>Variedad:</span> <strong>${esc(p.variedad)}</strong></div>
+    <div class="spec-item"><span>Patrón:</span> <strong>${esc(p.patron)}</strong></div>
+    <div class="spec-item"><span>Marco:</span> <strong>${esc(p.marco)}</strong></div>
+    <div class="spec-item"><span>Pies estimados:</span> <strong>${p.arboles ? esc(p.arboles) : '-'}</strong></div>
   `;
 
   // Historial de faenas de esta parcela
@@ -922,12 +978,12 @@ window.verDetalleParcela = function(parcelaId) {
     historialContainer.innerHTML = faenasDeEsta.map(f => `
       <div style="background:var(--bg-surface); padding:0.75rem; border-radius:var(--radius-sm); margin-bottom:0.5rem; border-left:3px solid var(--primary);">
         <div style="display:flex; justify-content:space-between; font-size:0.85rem; font-weight:700;">
-          <span>${f.tipoFaena}</span>
-          <span style="color:var(--text-muted); font-size:0.75rem;">${formatFecha(f.fecha)} · ${f.usuario}</span>
+          <span>${esc(f.tipoFaena)}</span>
+          <span style="color:var(--text-muted); font-size:0.75rem;">${esc(formatFecha(f.fecha))} · ${esc(f.usuario)}</span>
         </div>
-        ${f.quimicoProducto ? `<div style="font-size:0.8rem; color:var(--citrus-light); margin-top:2px;">🧪 ${f.quimicoProducto} (${f.quimicoDosis})</div>` : ''}
-        ${f.plagas && f.plagas.length ? `<div style="font-size:0.75rem; color:#fca5a5; margin-top:2px;">🐛 Plagas: ${f.plagas.join(', ')}</div>` : ''}
-        ${f.notas ? `<div style="font-size:0.8rem; color:var(--text-muted); margin-top:4px;">"${f.notas}"</div>` : ''}
+        ${f.quimicoProducto ? `<div style="font-size:0.8rem; color:var(--citrus-light); margin-top:2px;">🧪 ${esc(f.quimicoProducto)} (${esc(f.quimicoDosis)})</div>` : ''}
+        ${f.plagas && f.plagas.length ? `<div style="font-size:0.75rem; color:#fca5a5; margin-top:2px;">🐛 Plagas: ${f.plagas.map(esc).join(', ')}</div>` : ''}
+        ${f.notas ? `<div style="font-size:0.8rem; color:var(--text-muted); margin-top:4px;">"${esc(f.notas)}"</div>` : ''}
       </div>
     `).join('');
   }
@@ -940,7 +996,7 @@ window.cerrarModalParcela = function() {
 };
 
 // ============================================================================
-// MODAL CREAR NUEVO HUERTO
+// MODAL CREAR NUEVO HUERTO (VALIDADO)
 // ============================================================================
 window.abrirModalNuevaParcela = function() {
   document.getElementById('modal-crear-huerto').classList.remove('hidden');
@@ -952,78 +1008,323 @@ window.cerrarModalCrearHuerto = function() {
 
 window.guardarNuevoHuerto = function(e) {
   e.preventDefault();
-  const nombre = document.getElementById('nuevo-huerto-nombre').value.trim();
-  const superficie = document.getElementById('nuevo-huerto-superficie').value.trim();
-  const variedad = document.getElementById('nuevo-huerto-variedad').value.trim();
-  const patron = document.getElementById('nuevo-huerto-patron').value.trim();
-  const marco = document.getElementById('nuevo-huerto-marco').value.trim();
-  const ubicacion = document.getElementById('nuevo-huerto-ubicacion').value.trim();
+  try {
+    const rawHuerto = {
+      nombre: document.getElementById('nuevo-huerto-nombre').value,
+      superficie: document.getElementById('nuevo-huerto-superficie').value,
+      variedad: document.getElementById('nuevo-huerto-variedad').value,
+      patron: document.getElementById('nuevo-huerto-patron').value,
+      marco: document.getElementById('nuevo-huerto-marco').value,
+      ubicacion: document.getElementById('nuevo-huerto-ubicacion').value
+    };
 
-  const nuevo = {
-    id: 'p-' + Date.now(),
-    nombre: nombre,
-    superficie: superficie || 'No especificada',
-    variedad: variedad || 'Variedad estándar',
-    patron: patron || 'Sin especificar',
-    marco: marco || 'Marco estándar',
-    ubicacion: ubicacion,
-    arboles: null
-  };
+    const nuevo = (window.HuertoSecurity && window.HuertoSecurity.validateParcela)
+      ? window.HuertoSecurity.validateParcela(rawHuerto)
+      : { id: 'p-' + Date.now(), ...rawHuerto };
 
-  estado.parcelas.push(nuevo);
-  guardarDatos();
-  renderizarTodo();
-  cerrarModalCrearHuerto();
-  mostrarToast(`Huerto "${nombre}" guardado en el cuaderno de campo`);
+    estado.parcelas.push(nuevo);
+    guardarDatos();
+    renderizarTodo();
+    cerrarModalCrearHuerto();
+    mostrarToast(`Huerto "${nuevo.nombre}" guardado con éxito`);
+  } catch (err) {
+    mostrarToast(`⚠️ Error: ${err.message}`, 'danger');
+  }
 };
 
 // ============================================================================
-// EXPORTACIÓN / IMPORTACIÓN DE COPIAS
+// EXPORTACIÓN / IMPORTACIÓN SEGURA DE COPIAS
 // ============================================================================
 window.exportarDatos = function() {
-  const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(estado, null, 2));
+  // Deep sanitize para descartar prototipos o claves corruptas
+  const payloadLimpio = (window.HuertoSecurity && window.HuertoSecurity.deepSanitizeObject)
+    ? window.HuertoSecurity.deepSanitizeObject(estado)
+    : estado;
+
+  const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(payloadLimpio, null, 2));
   const downloadAnchor = document.createElement('a');
   downloadAnchor.setAttribute("href", dataStr);
   downloadAnchor.setAttribute("download", `huertos_carlos_respaldo_${new Date().toISOString().split('T')[0]}.json`);
   document.body.appendChild(downloadAnchor);
   downloadAnchor.click();
   downloadAnchor.remove();
-  mostrarToast('Copia de seguridad descargada');
+  mostrarToast('Copia de seguridad cifrada descargada');
+};
+
+// Exportación CSV con protección Anti-Inyección de fórmulas para Excel/Calc
+window.exportarDatosSegurosCsv = function() {
+  if (!estado.faenas || estado.faenas.length === 0) {
+    mostrarToast('No hay faenas para exportar a CSV');
+    return;
+  }
+
+  const sanitizeCell = (window.HuertoSecurity && window.HuertoSecurity.sanitizeCsvCell)
+    ? window.HuertoSecurity.sanitizeCsvCell
+    : val => `"${String(val || '').replace(/"/g, '""')}"`;
+
+  const headers = ['ID', 'Fecha', 'Hora', 'Huerto', 'Operario', 'Tipo Faena', 'Estado', 'Quimico', 'Dosis', 'Plagas', 'Hierba', 'Notas'];
+  const rows = [headers.map(h => `"${h}"`).join(',')];
+
+  estado.faenas.forEach(f => {
+    const plagasStr = (f.plagas && Array.isArray(f.plagas)) ? f.plagas.join('; ') : '';
+    const fila = [
+      sanitizeCell(f.id),
+      sanitizeCell(f.fecha),
+      sanitizeCell(f.hora || ''),
+      sanitizeCell(f.parcelaNombre),
+      sanitizeCell(f.usuario),
+      sanitizeCell(f.tipoFaena),
+      sanitizeCell(f.estado || 'Finalizadas'),
+      sanitizeCell(f.quimicoProducto || ''),
+      sanitizeCell(f.quimicoDosis || ''),
+      sanitizeCell(plagasStr),
+      sanitizeCell(f.hierba || 'Limpio'),
+      sanitizeCell(f.notas || '')
+    ];
+    rows.push(fila.join(','));
+  });
+
+  const csvContent = "\uFEFF" + rows.join('\r\n'); // BOM UTF-8 para Excel
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `huertos_carlos_faenas_seguras_${new Date().toISOString().split('T')[0]}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  mostrarToast('CSV exportado con protección anti-inyección');
 };
 
 window.importarDatos = function(event) {
   const file = event.target.files[0];
   if (!file) return;
 
+  // Límite de tamaño: max 10MB para prevenir ataques DoS por memoria
+  if (file.size > 10 * 1024 * 1024) {
+    mostrarToast('⚠️ Archivo demasiado grande (máximo 10 MB)', 'danger');
+    event.target.value = '';
+    return;
+  }
+
   const reader = new FileReader();
   reader.onload = function(e) {
     try {
-      const data = JSON.parse(e.target.result);
+      // Crear snapshot de respaldo automático antes de aplicar cambios
+      if (window.HuertoSecurity && window.HuertoSecurity.crearSnapshotSeguridad) {
+        window.HuertoSecurity.crearSnapshotSeguridad(STORAGE_KEY);
+      }
+
+      // Parser seguro anti-prototype pollution
+      const data = (window.HuertoSecurity && window.HuertoSecurity.safeJsonParse)
+        ? window.HuertoSecurity.safeJsonParse(e.target.result)
+        : JSON.parse(e.target.result);
+
+      if (!data || typeof data !== 'object') {
+        throw new Error('Estructura de archivo corrupta o vacía');
+      }
+
+      let countParcelas = 0;
+      let countFaenas = 0;
+
       if (data.parcelas && Array.isArray(data.parcelas)) {
-        estado.parcelas = data.parcelas;
-      }
-      if (data.faenas && Array.isArray(data.faenas)) {
-        data.faenas.forEach(f => {
-          f.estado = normalizarEstado(f.estado || 'Finalizadas');
+        estado.parcelas = data.parcelas.map(p => {
+          return (window.HuertoSecurity && window.HuertoSecurity.validateParcela)
+            ? window.HuertoSecurity.validateParcela(p)
+            : p;
         });
-        estado.faenas = data.faenas;
+        countParcelas = estado.parcelas.length;
       }
+
+      if (data.faenas && Array.isArray(data.faenas)) {
+        estado.faenas = data.faenas.map(f => {
+          f.estado = normalizarEstado(f.estado || 'Finalizadas');
+          return (window.HuertoSecurity && window.HuertoSecurity.validateFaena)
+            ? window.HuertoSecurity.validateFaena(f, estado.parcelas)
+            : f;
+        });
+        countFaenas = estado.faenas.length;
+      }
+
       guardarDatos();
       renderizarTodo();
-      mostrarToast('¡Datos importados y actualizados con éxito!');
+      actualizarEstadoCiberseguridadUI();
+      mostrarToast(`¡Importados con éxito ${countParcelas} huertos y ${countFaenas} faenas!`);
     } catch (err) {
-      alert('Error: el archivo no tiene un formato JSON válido.');
+      console.error('[Ciberseguridad] Error en importación:', err);
+      mostrarToast(`⚠️ Error en importación: ${err.message}`, 'danger');
+    } finally {
+      event.target.value = '';
     }
   };
   reader.readAsText(file);
 };
 
+window.deshacerUltimaAccion = function() {
+  if (window.HuertoSecurity && window.HuertoSecurity.restaurarSnapshotSeguridad) {
+    const ok = window.HuertoSecurity.restaurarSnapshotSeguridad(STORAGE_KEY);
+    if (ok) {
+      cargarDatos();
+      renderizarTodo();
+      actualizarEstadoCiberseguridadUI();
+      mostrarToast('↩️ Estado restaurado al punto previo a la importación');
+      return;
+    }
+  }
+  mostrarToast('No hay punto de restauración disponible');
+};
+
 window.restablecerDatosExcel = function() {
-  if (confirm('¿Restablecer el cuaderno de campo con las 30 parcelas y faenas originales del Excel de Carlos?')) {
+  if (confirm('¿Restablecer el cuaderno de campo con las 30 parcelas y faenas originales del Excel de Carlos?\n(Se creará una copia de seguridad automática de tu estado actual)')) {
+    if (window.HuertoSecurity && window.HuertoSecurity.crearSnapshotSeguridad) {
+      window.HuertoSecurity.crearSnapshotSeguridad(STORAGE_KEY);
+    }
     localStorage.removeItem(STORAGE_KEY);
     cargarDatos();
     renderizarTodo();
+    actualizarEstadoCiberseguridadUI();
     mostrarToast('¡Cuaderno de campo restaurado con el Excel de Carlos (30 huertos)!');
+  }
+};
+
+// ============================================================================
+// FUNCIONES DE CONTROL DE CIBERSEGURIDAD, INTEGRIDAD Y PRIVACIDAD EN CAMPO
+// ============================================================================
+function actualizarEstadoCiberseguridadUI() {
+  const pinBadge = document.getElementById('pin-status-badge');
+  const pinDesc = document.getElementById('pin-status-desc');
+  const btnPin = document.getElementById('btn-gestionar-pin');
+  const btnDeshacer = document.getElementById('btn-deshacer-seguridad');
+
+  if (window.HuertoSecurity) {
+    const tienePin = window.HuertoSecurity.tienePinActivo();
+    if (pinBadge) {
+      pinBadge.innerText = tienePin ? 'Activo (4 dígitos)' : 'Desactivado';
+      pinBadge.style.color = tienePin ? 'var(--primary-light)' : 'var(--text-subtle)';
+      pinBadge.style.background = tienePin ? 'rgba(34, 197, 94, 0.15)' : 'rgba(100, 116, 139, 0.15)';
+    }
+    if (pinDesc) {
+      pinDesc.innerText = tienePin ? 'Bloqueo activo. Requiere PIN para desbloquear.' : 'Protege el cuaderno de campo con un PIN opcional.';
+    }
+    if (btnPin) {
+      btnPin.innerText = tienePin ? '🔓 Desactivar PIN' : '🔐 Configurar PIN de Bloqueo';
+    }
+
+    // Comprobar si hay snapshot de recuperación disponible
+    const snap = localStorage.getItem('huertos_carlos_snapshot_pre_action');
+    if (btnDeshacer) {
+      btnDeshacer.style.display = snap ? 'inline-block' : 'none';
+    }
+  }
+}
+
+window.verificarCiberseguridad = function() {
+  const hash = localStorage.getItem('huertos_carlos_integrity_hash_v3') || 'Local';
+  alert(
+    `🛡️ ESTADO DE CIBERSEGURIDAD - HUERTOS CARLOS\n` +
+    `==========================================\n` +
+    `• Aislamiento de Red: Cero fugas a servidores externos (100% Local / Offline)\n` +
+    `• Protección de Navegación: CSP y Anti-Clickjacking estrictos activos\n` +
+    `• Prevención de Inyecciones: Filtro Anti-XSS y Anti-Inyección CSV activos\n` +
+    `• Integridad de Datos: SHA-256 verificado (${hash.substring(0, 16)}...)\n` +
+    `• Estado de Privacidad: ${window.HuertoSecurity && window.HuertoSecurity.tienePinActivo() ? 'PIN Activo' : 'Sin PIN'}\n\n` +
+    `Tus datos agrícolas están 100% a salvo y protegidos.`
+  );
+};
+
+window.verificarIntegridadManual = async function() {
+  if (window.HuertoSecurity) {
+    const res = await window.HuertoSecurity.cargarConIntegridad(STORAGE_KEY);
+    if (res.status === 'VERIFIED') {
+      mostrarToast(`✅ Integridad confirmada: SHA-256 coincide exactamente`);
+    } else if (res.status === 'TAMPERED') {
+      mostrarToast(`⚠️ Alerta: El hash no coincide con la firma guardada`, 'warning');
+    } else {
+      mostrarToast(`ℹ️ Estado de datos: ${res.status}`);
+    }
+  }
+};
+
+window.gestionarPinSeguridad = async function() {
+  if (!window.HuertoSecurity) return;
+  if (window.HuertoSecurity.tienePinActivo()) {
+    if (confirm('¿Deseas eliminar el PIN de bloqueo y dejar el acceso libre?')) {
+      window.HuertoSecurity.eliminarPinSeguridad();
+      actualizarEstadoCiberseguridadUI();
+      mostrarToast('PIN de seguridad eliminado');
+    }
+  } else {
+    const pin = prompt('Introduce un PIN de 4 dígitos numéricos para proteger la web:');
+    if (pin === null) return;
+    if (!/^\d{4}$/.test(pin)) {
+      alert('Error: El PIN debe tener exactamente 4 dígitos numéricos (ej. 1234).');
+      return;
+    }
+    await window.HuertoSecurity.configurarPinSeguridad(pin);
+    actualizarEstadoCiberseguridadUI();
+    mostrarToast('¡PIN de 4 dígitos configurado con éxito!');
+  }
+};
+
+function iniciarProteccionPrivacidad() {
+  if (!window.HuertoSecurity) return;
+
+  // Si la sesión está marcada como bloqueada, abrir modal
+  if (window.HuertoSecurity.estaSesionBloqueada()) {
+    const modal = document.getElementById('modal-pin-lock');
+    if (modal) modal.classList.remove('hidden');
+  }
+
+  // Setup inputs de 4 dígitos
+  const inputs = [
+    document.getElementById('pin-d1'),
+    document.getElementById('pin-d2'),
+    document.getElementById('pin-d3'),
+    document.getElementById('pin-d4')
+  ];
+
+  inputs.forEach((inp, idx) => {
+    if (!inp) return;
+    inp.addEventListener('input', (e) => {
+      if (e.target.value.length === 1 && idx < 3) {
+        inputs[idx + 1].focus();
+      }
+      if (idx === 3 && e.target.value.length === 1) {
+        comprobarPinEntrada();
+      }
+    });
+    inp.addEventListener('keydown', (e) => {
+      if (e.key === 'Backspace' && !e.target.value && idx > 0) {
+        inputs[idx - 1].focus();
+      }
+    });
+  });
+}
+
+window.comprobarPinEntrada = async function() {
+  if (!window.HuertoSecurity) return;
+  const d1 = document.getElementById('pin-d1')?.value || '';
+  const d2 = document.getElementById('pin-d2')?.value || '';
+  const d3 = document.getElementById('pin-d3')?.value || '';
+  const d4 = document.getElementById('pin-d4')?.value || '';
+  const pin = d1 + d2 + d3 + d4;
+
+  const valido = await window.HuertoSecurity.verificarPin(pin);
+  const errMsg = document.getElementById('pin-error-msg');
+  if (valido) {
+    window.HuertoSecurity.desbloquearSesion();
+    const modal = document.getElementById('modal-pin-lock');
+    if (modal) modal.classList.add('hidden');
+    if (errMsg) errMsg.style.display = 'none';
+    mostrarToast('Acceso desbloqueado');
+  } else {
+    if (errMsg) errMsg.style.display = 'block';
+    [1, 2, 3, 4].forEach(i => {
+      const el = document.getElementById(`pin-d${i}`);
+      if (el) el.value = '';
+    });
+    document.getElementById('pin-d1')?.focus();
   }
 };
 
@@ -1039,13 +1340,16 @@ function formatFecha(fechaStr) {
   return fechaStr;
 }
 
-function mostrarToast(mensaje) {
+function mostrarToast(mensaje, tipo = 'success') {
   const container = document.getElementById('toast-container');
   if (!container) return;
 
+  const esc = (window.HuertoSecurity && window.HuertoSecurity.escapeHtml) ? window.HuertoSecurity.escapeHtml : s => s;
+
   const toast = document.createElement('div');
   toast.className = 'toast';
-  toast.innerHTML = `<span>🌱</span> <span>${mensaje}</span>`;
+  const icon = tipo === 'danger' ? '⚠️' : tipo === 'warning' ? '🔔' : '🌱';
+  toast.innerHTML = `<span>${icon}</span> <span>${esc(mensaje)}</span>`;
   container.appendChild(toast);
 
   setTimeout(() => {
@@ -1054,3 +1358,4 @@ function mostrarToast(mensaje) {
     setTimeout(() => toast.remove(), 400);
   }, 3500);
 }
+

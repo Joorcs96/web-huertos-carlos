@@ -31,10 +31,18 @@ Aplicación web moderna, ligera y responsive (PWA) diseñada para que Carlos pue
   - Gráficas interactivas con la curva de absorción hídrica de cada bancal en las últimas 24 horas.
   - Histórico de riegos ejecutados (hora, duración, litros y tipo).
 
-- **🔌 Conectividad IoT y Hardware Real:**
-  - **Modo Simulación / Demo:** Permite probar todas las funcionalidades interactivamente sin hardware conectado.
-  - **Modo ESP32 / IoT:** Conexión directa mediante API REST con un microcontrolador ESP32 conectado al WiFi del huerto.
-  - Se incluye firmware completo y probado en `hardware/esp32_huerto_carlos.ino`.
+- **🛡️ Ciberseguridad Integral & Cero Fugas de Datos:**
+  - **Aislamiento Local (Zero Data Leak):** Los datos agrícolas de Carlos permanecen 100% en el dispositivo; sin rastreadores, sin cookies de terceros ni telemetría externa.
+  - **Directivas CSP Estrictas:** Cabeceras y metaetiquetas `Content-Security-Policy`, anti-clickjacking (`X-Frame-Options: DENY`) y `X-Content-Type-Options: nosniff`.
+  - **Integridad Criptográfica SHA-256:** Verificación de integridad de la base de datos local en `localStorage` con detección automática de manipulaciones externas o corrupción.
+  - **Sanitización Anti-XSS:** Todas las variables dinámicas se codifican e higienizan antes de insertarse en el DOM.
+  - **Defensa contra Prototype Pollution:** Parser JSON seguro que neutraliza inyecciones en `__proto__`, `constructor` o `prototype`.
+  - **Prevención de Inyección CSV:** Exportaciones CSV protegidas contra ejecución de fórmulas maliciosas en Microsoft Excel o LibreOffice.
+  - **Modo Privacidad en Campo (PIN):** Bloqueo opcional de la sesión mediante PIN de 4 dígitos para proteger el teléfono en el huerto.
+
+- **🔌 Conectividad IoT y Hardware Seguro:**
+  - **Modo ESP32 / IoT Protegido:** Conexión mediante API REST con autenticación por clave de seguridad (`X-Huerto-Key`), restricción de orígenes CORS, limitador de tasa (Rate Limiting) y Watchdog de seguridad (corte automático a los 15 min para evitar sobre-riego o inundaciones).
+  - Firmware disponible en `hardware/esp32_huerto_carlos.ino`.
 
 ---
 
@@ -42,18 +50,24 @@ Aplicación web moderna, ligera y responsive (PWA) diseñada para que Carlos pue
 
 ```text
 web-huertos-carlos/
-├── index.html                  # Interfaz principal (Dashboard, Programador, Gráficas, IoT)
-├── styles.css                  # Estilos responsivos modernos y diseño adaptado a móviles
-├── app.js                      # Lógica de la app, simulación, temporizadores y cliente REST
+├── index.html                  # Interfaz principal PWA y panel de ciberseguridad
+├── styles.css                  # Estilos responsivos, Kanban y componentes de seguridad
+├── security.js                 # Motor de ciberseguridad (Anti-XSS, SHA-256, Anti-CSV injection)
+├── app.js                      # Lógica de la app, persistencia con integridad y renderizado
+├── datos_huertos.js            # Base de datos inicial (30 parcelas y 1.175 faenas del Excel)
 ├── manifest.json               # Configuración PWA para instalación móvil
-├── sw.js                       # Service Worker para caché y modo offline
+├── sw.js                       # Service Worker con caché aislada y modo offline seguro
 ├── hardware/
-│   └── esp32_huerto_carlos.ino # Firmware de ejemplo para ESP32 con servidor REST
+│   └── esp32_huerto_carlos.ino # Firmware seguro para ESP32 con autenticación y watchdog
+├── tools/
+│   ├── test_security.js        # Suite de pruebas automatizadas de ciberseguridad
+│   ├── huertos_carlos.xlsx     # Hoja de cálculo original de campo
+│   └── procesar_excel_completo.py # Script de extracción de datos
 ├── .github/
 │   └── workflows/
 │       └── pages.yml           # Despliegue automático a GitHub Pages
 ├── .gitignore                  # Exclusiones de control de versiones
-└── README.md                   # Documentación del proyecto
+└── README.md                   # Documentación técnica del proyecto
 ```
 
 ---

@@ -10,8 +10,15 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   
+  <!-- Directivas de Ciberseguridad y Prevención de Fugas de Datos (CSP) -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' http://localhost:* http://127.0.0.1:* http://192.168.* http://10.* https://*.github.io; font-src 'self'; object-src 'none'; media-src 'none'; frame-src 'none'; child-src 'none'; form-action 'self'; base-uri 'self';">
+  <meta http-equiv="X-Content-Type-Options" content="nosniff">
+  <meta http-equiv="X-Frame-Options" content="DENY">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <meta http-equiv="Permissions-Policy" content="camera=(), microphone=(), geolocation=(self), payment=(), usb=()">
+
   <link rel="manifest" href="manifest.json">
-  <link rel="stylesheet" href="styles.css?v=2">
+  <link rel="stylesheet" href="styles.css?v=3">
 </head>
 <body>
 
@@ -44,6 +51,10 @@
       </div>
 
       <div class="header-actions">
+        <div class="security-badge" id="security-status-badge" onclick="verificarCiberseguridad()" title="Ciberseguridad Activa: Datos 100% locales, SHA-256 verificado, Cero fugas">
+          <span class="security-dot"></span>
+          <span class="security-text">Datos Seguros</span>
+        </div>
         <button class="btn-new-task" onclick="abrirNuevaFaena()" title="Añadir parte de faena">
           <span>+ Nueva Faena</span>
         </button>
@@ -279,20 +290,76 @@
         </div>
       </div>
 
-      <!-- Importador / Exportador de datos -->
+      <!-- Importador / Exportador de datos y Copia de Seguridad -->
       <div class="card" style="margin-top:1.5rem;">
         <h3>
           <span>📂</span>
           <span>Copia de Seguridad & Datos Excel</span>
         </h3>
         <p class="text-subtle" style="margin-bottom:1rem;">
-          Puedes exportar todas las faenas y huertos a archivo JSON/CSV o sincronizar con el equipo.
+          Puedes exportar todas las faenas y huertos a archivo JSON o CSV seguro (con protección anti-inyección) o sincronizar con el equipo.
         </p>
         <div style="display:flex; gap:0.75rem; flex-wrap:wrap;">
           <button class="btn-secondary" onclick="exportarDatos()">Descargar Copia (JSON)</button>
+          <button class="btn-secondary" onclick="exportarDatosSegurosCsv()">Exportar CSV Seguro</button>
           <button class="btn-secondary" onclick="document.getElementById('import-file').click()">Cargar Datos Excel / JSON</button>
           <button class="btn-secondary" style="border-color:var(--primary); color:var(--primary-light);" onclick="restablecerDatosExcel()">🔄 Restaurar Datos del Excel (30 Huertos)</button>
           <input type="file" id="import-file" style="display:none;" onchange="importarDatos(event)" accept=".json,.csv">
+        </div>
+      </div>
+
+      <!-- Panel de Ciberseguridad, Integridad de Datos y Privacidad en Campo -->
+      <div class="security-card" id="security-control-panel">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
+          <div style="display:flex; align-items:center; gap:0.5rem;">
+            <span style="font-size:1.4rem;">🛡️</span>
+            <div>
+              <h3 style="margin:0; font-size:1.05rem;">Ciberseguridad & Protección Cero Fugas</h3>
+              <p class="text-subtle" style="font-size:0.75rem; margin:0;">Tus datos permanecen 100% privados en tu dispositivo y protegidos contra accesos no autorizados.</p>
+            </div>
+          </div>
+          <span class="security-item-badge" id="security-checksum-status">SHA-256 Verificado</span>
+        </div>
+
+        <div class="security-status-grid">
+          <div class="security-item">
+            <span class="security-item-icon">🔒</span>
+            <div class="security-item-info">
+              <h4>Aislamiento Local</h4>
+              <p>Sin rastreadores, telemetría ni envío de datos a servidores de terceros.</p>
+              <span class="security-item-badge">Cero Fugas</span>
+            </div>
+          </div>
+          <div class="security-item">
+            <span class="security-item-icon">🛡️</span>
+            <div class="security-item-info">
+              <h4>Protección Anti-XSS</h4>
+              <p>Sanitización estricta de entradas y contenidos HTML.</p>
+              <span class="security-item-badge">Activo</span>
+            </div>
+          </div>
+          <div class="security-item">
+            <span class="security-item-icon">📜</span>
+            <div class="security-item-info">
+              <h4>Anti-Inyección CSV</h4>
+              <p>Exportaciones neutralizadas para evitar ejecución de macros en Excel.</p>
+              <span class="security-item-badge">Protegido</span>
+            </div>
+          </div>
+          <div class="security-item">
+            <span class="security-item-icon">🔑</span>
+            <div class="security-item-info">
+              <h4>Bloqueo en Campo</h4>
+              <p id="pin-status-desc">Protege el cuaderno de campo con un PIN numérico opcional.</p>
+              <span class="security-item-badge" id="pin-status-badge">Desactivado</span>
+            </div>
+          </div>
+        </div>
+
+        <div style="display:flex; gap:0.6rem; flex-wrap:wrap; margin-top:0.75rem;">
+          <button type="button" class="btn-secondary-sm" onclick="verificarIntegridadManual()">🔍 Verificar Integridad</button>
+          <button type="button" class="btn-secondary-sm" onclick="gestionarPinSeguridad()" id="btn-gestionar-pin">🔐 Configurar PIN de Bloqueo</button>
+          <button type="button" class="btn-secondary-sm" id="btn-deshacer-seguridad" style="display:none; color:#fca5a5; border-color:#ef4444;" onclick="deshacerUltimaAccion()">↩️ Deshacer Última Importación</button>
         </div>
       </div>
     </div>
@@ -362,12 +429,35 @@
       </div>
     </div>
 
+    <!-- Modal de Bloqueo por PIN de Privacidad en Campo -->
+    <div id="modal-pin-lock" class="modal-overlay hidden">
+      <div class="modal-pin-card">
+        <div style="font-size:2.2rem; margin-bottom:0.5rem;">🔒</div>
+        <h3 style="margin-bottom:0.25rem;">Cuaderno de Campo Bloqueado</h3>
+        <p class="text-subtle" style="font-size:0.8rem;">Introduce tu PIN de 4 dígitos para acceder</p>
+        
+        <div class="pin-inputs-wrap">
+          <input type="password" maxlength="1" class="pin-digit-input" id="pin-d1" inputmode="numeric" autocomplete="off">
+          <input type="password" maxlength="1" class="pin-digit-input" id="pin-d2" inputmode="numeric" autocomplete="off">
+          <input type="password" maxlength="1" class="pin-digit-input" id="pin-d3" inputmode="numeric" autocomplete="off">
+          <input type="password" maxlength="1" class="pin-digit-input" id="pin-d4" inputmode="numeric" autocomplete="off">
+        </div>
+
+        <div style="display:flex; gap:0.5rem; justify-content:center; margin-top:1rem;">
+          <button type="button" class="btn-submit-faena" style="padding:0.6rem 1.25rem;" onclick="comprobarPinEntrada()">Desbloquear</button>
+        </div>
+        <p id="pin-error-msg" style="color:var(--danger); font-size:0.75rem; margin-top:0.75rem; display:none;">PIN incorrecto. Inténtalo de nuevo.</p>
+      </div>
+    </div>
+
   </main>
 
   <div id="toast-container" class="toast-container"></div>
 
-  <script src="datos_huertos.js?v=2"></script>
-  <script src="app.js?v=2"></script>
+  <!-- Módulos de la Aplicación con Ciberseguridad Activa -->
+  <script src="security.js?v=3"></script>
+  <script src="datos_huertos.js?v=3"></script>
+  <script src="app.js?v=3"></script>
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {

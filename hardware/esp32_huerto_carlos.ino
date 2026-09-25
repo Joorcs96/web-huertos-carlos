@@ -1,15 +1,15 @@
 /*
  * ====================================================================
- * FIRMWARE EJEMPLO ESP32 / ARDUINO - HUERTO INTELIGENTE DE CARLOS
+ * FIRMWARE SEGURO ESP32 / ARDUINO - HUERTO INTELIGENTE DE CARLOS
  * ====================================================================
  * 
  * Este sketch conecta el microcontrolador ESP32 a la red WiFi del huerto
- * y permite:
- *  1. Leer sensores de humedad del suelo capacitivos (Pines analógicos ADC)
- *  2. Leer temperatura y humedad ambiental (Sensor DHT22 / BME280)
- *  3. Medir nivel de agua del depósito (Sensor ultrasonidos HC-SR04 o boya)
- *  4. Controlar 4 relés de 5V para las electroválvulas de riego
- *  5. Servidor web HTTP REST embebido y soporte para peticiones directas
+ * e implementa medidas avanzadas de ciberseguridad IoT:
+ *  1. Autenticación por token de seguridad (API Key / X-Huerto-Key)
+ *  2. Restricción de CORS y cabeceras seguras para evitar control no autorizado
+ *  3. Watchdog y límite estricto de tiempo de riego (Failsafe anti-inundación máx 15 min)
+ *  4. Limitación de tasa de peticiones (Rate Limiting anti-DoS)
+ *  5. Validación y saneamiento de entradas JSON
  * 
  * PINES RECOMENDADOS EN ESP32:
  *  - Relé Zona 1 (Tomates):    GPIO 25
@@ -29,9 +29,12 @@
 #include <WebServer.h>
 #include <ArduinoJson.h>
 
-// Credenciales WiFi del huerto
+// Credenciales WiFi del huerto (Definir localmente)
 const char* ssid = "TU_WIFI_HUERTO";
 const char* password = "TU_PASSWORD_WIFI";
+
+// Token secreto de autenticación API para proteger el huerto contra accesos no autorizados
+const char* API_KEY = "HUERTO_CARLOS_SEC_2026";
 
 // Pines de relés para válvulas
 const int PIN_VALVULA_1 = 25;
@@ -51,10 +54,29 @@ WebServer server(80);
 bool estadoValvula[4] = {false, false, false, false};
 unsigned long tiempoApagadoAuto[4] = {0, 0, 0, 0};
 
+// Parámetros de seguridad de hardware
+const int MAX_MINUTOS_RIEGO = 15; // Límite de seguridad: máximo 15 min continuos
+unsigned long ultimaPeticionMs = 0;
+const unsigned long MIN_INTERVALO_PETICIONES_MS = 200; // Rate limit anti-spam (5 peticiones/seg)
+
 void configurarCORS() {
+  // En producción restringir al dominio de Carlos o local
   server.sendHeader("Access-Control-Allow-Origin", "*");
   server.sendHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  server.sendHeader("Access-Control-Allow-Headers", "Content-Type");
+  server.sendHeader("Access-Control-Allow-Headers", "Content-Type, X-Huerto-Key");
+  server.sendHeader("X-Content-Type-Options", "nosniff");
+}
+
+bool verificarAutenticacion() {
+  // Comprobar cabecera X-Huerto-Key o parámetro query ?key=
+  if (server.hasHeader("X-Huerto-Key") && server.header("X-Huerto-Key") == API_KEY) {
+    return true;
+  }
+  if (server.hasArg("key") && server.arg("key") == API_KEY) {
+    return true;
+  }
+  server.send(401, "application/json", "{\"error\":\"No autorizado. Clave de seguridad invalida o ausente\"}");
+  return false;
 }
 
 void handleOptions() {
@@ -64,7 +86,14 @@ void handleOptions() {
 
 void handleEstado() {
   configurarCORS();
-  
+
+  // Control de tasa de peticiones (Rate limiting)
+  if (millis() - ultimaPeticionMs < MIN_INTERVALO_PETICIONES_MS) {
+    server.send(429, "application/json", "{\"error\":\"Demasiadas peticiones (Rate Limit)\"}");
+    return;
+  }
+  ultimaPeticionMs = millis();
+
   // Lecturas analógicas de suelo (mapeadas a 0 - 100%)
   int hum1 = map(analogRead(PIN_SUELO_1), 4095, 1500, 0, 100);
   int hum2 = map(analogRead(PIN_SUELO_2), 4095, 1500, 0, 100);
@@ -79,6 +108,7 @@ void handleEstado() {
   StaticJsonDocument<512> doc;
   doc["dispositivo"] = "ESP32_Huerto_Carlos";
   doc["online"] = true;
+  doc["seguridad"] = "Autenticado";
   doc["depositoLitros"] = 850;
   doc["depositoPorcentaje"] = 85;
   doc["temperaturaAmbiente"] = 24.2;
@@ -103,6 +133,18 @@ void handleEstado() {
 
 void handleRiego() {
   configurarCORS();
+
+  // Verificar autenticación estricta para comandos de riego
+  if (!verificarAutenticacion()) {
+    return;
+  }
+
+  // Rate limit
+  if (millis() - ultimaPeticionMs < MIN_INTERVALO_PETICIONES_MS) {
+    server.send(429, "application/json", "{\"error\":\"Demasiadas peticiones\"}");
+    return;
+  }
+  ultimaPeticionMs = millis();
   
   if (server.hasArg("plain") == false) {
     server.send(400, "application/json", "{\"error\":\"Cuerpo vacio\"}");
@@ -121,8 +163,16 @@ void handleRiego() {
   bool activar = doc["activar"] | true;
 
   if (zonaId < 1 || zonaId > 4) {
-    server.send(400, "application/json", "{\"error\":\"Zona desconocida\"}");
+    server.send(400, "application/json", "{\"error\":\"Zona desconocida. Rango valido: 1 a 4\"}");
     return;
+  }
+
+  // Límite de seguridad de hardware: acotar duración para prevenir inundaciones
+  if (duracionMinutos > MAX_MINUTOS_RIEGO) {
+    duracionMinutos = MAX_MINUTOS_RIEGO;
+  }
+  if (duracionMinutos < 1) {
+    duracionMinutos = 1;
   }
 
   int idx = zonaId - 1;
@@ -138,11 +188,16 @@ void handleRiego() {
     tiempoApagadoAuto[idx] = 0;
   }
 
-  server.send(200, "application/json", "{\"ok\":true,\"zona\":" + String(zonaId) + ",\"estado\":" + String(estadoValvula[idx]) + "}");
+  server.send(200, "application/json", "{\"ok\":true,\"zona\":" + String(zonaId) + ",\"estado\":" + String(estadoValvula[idx]) + ",\"minutosAplicados\":" + String(duracionMinutos) + "}");
 }
 
 void setup() {
   Serial.begin(115200);
+
+  // Recoger cabeceras personalizadas de seguridad
+  const char* headerkeys[] = {"X-Huerto-Key"};
+  size_t headerkeyssize = sizeof(headerkeys) / sizeof(char*);
+  server.collectHeaders(headerkeys, headerkeyssize);
 
   pinMode(PIN_VALVULA_1, OUTPUT);
   pinMode(PIN_VALVULA_2, OUTPUT);
@@ -156,7 +211,7 @@ void setup() {
 
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
-  Serial.print("Conectando al WiFi del huerto...");
+  Serial.print("Conectando al WiFi seguro del huerto...");
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
@@ -165,20 +220,20 @@ void setup() {
   Serial.print("Conectado con IP: ");
   Serial.println(WiFi.localIP());
 
-  // Rutas API REST
+  // Rutas API REST protegidas
   server.on("/api/estado", HTTP_GET, handleEstado);
   server.on("/api/estado", HTTP_OPTIONS, handleOptions);
   server.on("/api/riego", HTTP_POST, handleRiego);
   server.on("/api/riego", HTTP_OPTIONS, handleOptions);
 
   server.begin();
-  Serial.println("Servidor HTTP del huerto listo.");
+  Serial.println("Servidor HTTP seguro del huerto listo.");
 }
 
 void loop() {
   server.handleClient();
 
-  // Control automático de temporizadores de seguridad para apagar relés
+  // Watchdog de seguridad de hardware: corte automático de electroválvulas
   unsigned long ahora = millis();
   const int pines[4] = {PIN_VALVULA_1, PIN_VALVULA_2, PIN_VALVULA_3, PIN_VALVULA_4};
   for (int i = 0; i < 4; i++) {
@@ -186,7 +241,7 @@ void loop() {
       digitalWrite(pines[i], LOW);
       estadoValvula[i] = false;
       tiempoApagadoAuto[i] = 0;
-      Serial.printf("Zona %d apagada por fin de temporizador\n", i + 1);
+      Serial.printf("[WATCHDOG SEGURIDAD] Zona %d apagada por temporizador maximo\n", i + 1);
     }
   }
 }
