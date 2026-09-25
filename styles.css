@@ -158,6 +158,7 @@ body {
   margin: 0 auto;
   display: flex;
   padding: 0 0.5rem;
+  min-width: max-content;
 }
 
 .nav-btn {
@@ -166,7 +167,7 @@ body {
   color: var(--text-muted);
   font-size: 0.85rem;
   font-weight: 600;
-  padding: 0.85rem 1rem;
+  padding: 0.85rem 0.9rem;
   cursor: pointer;
   white-space: nowrap;
   position: relative;
@@ -272,6 +273,55 @@ body {
   font-size: 0.8rem;
   flex: 1;
   min-width: 140px;
+}
+
+.feed-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.feed-list .feed-card {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: 1rem 1.15rem;
+  box-shadow: var(--shadow-sm);
+  transition: var(--transition);
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.feed-list .feed-card:hover {
+  border-color: var(--primary);
+  transform: translateY(-1px);
+}
+
+.feed-status-pill {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.2rem 0.55rem;
+  border-radius: var(--radius-full);
+  white-space: nowrap;
+}
+
+.feed-status-pill.pendientes {
+  background-color: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.feed-status-pill.en-curso {
+  background-color: rgba(59, 130, 246, 0.15);
+  color: #60a5fa;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+}
+
+.feed-status-pill.finalizadas {
+  background-color: rgba(34, 197, 94, 0.15);
+  color: var(--primary-light);
+  border: 1px solid rgba(34, 197, 94, 0.3);
 }
 
 .feed-container-kanban {
@@ -1191,26 +1241,15 @@ body {
 }
 
 /* ==========================================================================
-   CIBERSEGURIDAD, PROTECCIÓN DE DATOS Y PRIVACIDAD EN CAMPO
+   CIBERSEGURIDAD, PROTECCIÓN DE DATOS Y PRIVACIDAD EN CAMPO (Oculto en pruebas)
    ========================================================================== */
-.security-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  background: rgba(34, 197, 94, 0.12);
-  border: 1px solid rgba(34, 197, 94, 0.3);
-  padding: 0.25rem 0.65rem;
-  border-radius: var(--radius-full);
-  font-size: 0.72rem;
-  font-weight: 600;
-  color: var(--primary-light);
-  cursor: pointer;
-  transition: var(--transition);
-}
-
-.security-badge:hover {
-  background: rgba(34, 197, 94, 0.2);
-  border-color: var(--primary);
+.security-badge,
+.security-card,
+.modal-pin-card,
+#modal-pin-lock,
+#security-status-badge,
+#security-control-panel {
+  display: none !important;
 }
 
 .security-dot {

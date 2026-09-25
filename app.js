@@ -209,6 +209,7 @@ window.abrirNuevaFaena = function(parcelaIdPrevia = null) {
 // ============================================================================
 function renderizarTodo() {
   renderizarFeed();
+  renderizarDevops();
   renderizarParcelas();
   renderizarSelectoresHuertos();
   renderizarOperariosChips();
@@ -280,6 +281,7 @@ window.toggleTodosLosMeses = function() {
     }
   });
 };
+window.toggleTodosLosMesesDevops = window.toggleTodosLosMeses;
 
 window.scrollHaciaColumna = function(periodoClave, estadoNombre) {
   const colId = `col-${periodoClave}-${estadoNombre.replace(/\s+/g, '-')}`;
@@ -349,6 +351,7 @@ window.cambiarEstadoFaena = function(faenaId, nuevoEstado, event) {
   // Preservar la posición vertical del scroll para evitar saltos en móvil
   const scrollActual = window.scrollY;
 
+  renderizarDevops();
   renderizarFeed();
 
   // Restaurar posición de scroll
@@ -449,15 +452,130 @@ function generarTarjetaFaenaHtml(f) {
   `;
 }
 
-// 1. Renderizar Feed de Faenas (Agrupado por Año/Mes y Tablero Kanban de 3 columnas)
-function renderizarFeed(filtroHuerto, filtroUsuario, filtroPeriodo) {
+// 1. Renderizar Muro Histórico de Faenas (Cronológico clásico vertical, como estaba antes)
+function renderizarFeed(filtroHuerto, filtroUsuario) {
   const container = document.getElementById('feed-container');
   const countBadge = document.getElementById('count-faenas');
   if (!container) return;
 
+  const esc = (window.HuertoSecurity && window.HuertoSecurity.escapeHtml) ? window.HuertoSecurity.escapeHtml : s => (s || '');
+
   const huertoSel = filtroHuerto !== undefined ? filtroHuerto : (document.getElementById('filtro-huerto-feed')?.value || 'todos');
   const usuarioSel = filtroUsuario !== undefined ? filtroUsuario : (document.getElementById('filtro-usuario-feed')?.value || 'todos');
-  const periodoSel = filtroPeriodo !== undefined ? filtroPeriodo : (document.getElementById('filtro-periodo-feed')?.value || 'todos');
+
+  let faenasFiltradas = [...estado.faenas].sort((a, b) => {
+    return new Date(`${b.fecha} ${b.hora || '12:00'}`) - new Date(`${a.fecha} ${a.hora || '12:00'}`);
+  });
+
+  if (huertoSel !== 'todos') {
+    faenasFiltradas = faenasFiltradas.filter(f => f.parcelaId === huertoSel);
+  }
+  if (usuarioSel !== 'todos') {
+    faenasFiltradas = faenasFiltradas.filter(f => f.usuarioId === usuarioSel || f.usuario === usuarioSel);
+  }
+
+  if (countBadge) {
+    countBadge.innerText = `${faenasFiltradas.length} faenas`;
+  }
+
+  if (faenasFiltradas.length === 0) {
+    container.innerHTML = `
+      <div style="text-align:center; padding:2.5rem 1rem; color:var(--text-muted); background:var(--bg-card); border-radius:var(--radius-lg);">
+        <p style="font-size:2rem; margin-bottom:0.5rem;">🚜</p>
+        <p>No hay faenas registradas con estos filtros en el histórico.</p>
+        <button class="btn-new-task" style="margin-top:1rem;" onclick="abrirNuevaFaena()">+ Registrar Primera Faena</button>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = '';
+  faenasFiltradas.forEach(f => {
+    const card = document.createElement('div');
+    card.className = 'feed-card';
+
+    // Tags de plagas detectadas
+    let tagsPlagasHtml = '';
+    if (f.plagas && f.plagas.length > 0) {
+      f.plagas.forEach(p => {
+        tagsPlagasHtml += `<span class="tag-plaga">⚠️ ${esc(p)}</span>`;
+      });
+    }
+
+    // Tag de estado de hierba
+    let tagHierbaHtml = '';
+    if (f.hierba === 'Limpio') {
+      tagHierbaHtml = `<span class="tag-hierba limpio">🟢 Sin hierba</span>`;
+    } else if (f.hierba === 'Poca hierba') {
+      tagHierbaHtml = `<span class="tag-hierba poca">🟡 Poca hierba</span>`;
+    } else if (f.hierba === 'Mucha hierba') {
+      tagHierbaHtml = `<span class="tag-hierba mucha">🔴 Mucha hierba</span>`;
+    }
+
+    // Badge químico
+    let quimicoHtml = '';
+    if (f.quimicoProducto) {
+      quimicoHtml = `
+        <div class="feed-quimicos-badge">
+          <span>🧪</span>
+          <strong>${esc(f.quimicoProducto)}</strong>
+          ${f.quimicoDosis ? `(${esc(f.quimicoDosis)})` : ''}
+        </div>
+      `;
+    }
+
+    const estadoNorm = normalizarEstado(f.estado);
+    const estadoClass = estadoNorm.toLowerCase().replace(/\s+/g, '-');
+    const estadoEmoji = estadoNorm === 'Pendientes' ? '🟡' : (estadoNorm === 'En curso' ? '🔵' : '🟢');
+
+    card.innerHTML = `
+      <div class="feed-header">
+        <div class="feed-title-wrap">
+          <strong>${esc(f.parcelaNombre)}</strong>
+          <div class="feed-meta">
+            <span>👤 ${esc(f.usuario)}</span>
+            <span>·</span>
+            <span>📅 ${formatFecha(f.fecha)} ${f.hora ? `a las ${esc(f.hora)}` : ''}</span>
+          </div>
+        </div>
+        <div style="display:flex; align-items:center; gap:0.4rem; flex-wrap:wrap; justify-content:flex-end;">
+          <span class="feed-task-badge">${esc(f.tipoFaena)}</span>
+          <span class="feed-status-pill ${estadoClass}">${estadoEmoji} ${esc(estadoNorm)}</span>
+        </div>
+      </div>
+
+      ${quimicoHtml}
+
+      <div class="feed-tags-row">
+        ${tagHierbaHtml}
+        ${tagsPlagasHtml}
+      </div>
+
+      ${f.notas ? `<div class="feed-notas">"${esc(f.notas)}"</div>` : ''}
+    `;
+    container.appendChild(card);
+  });
+}
+
+window.filtrarFeedPorHuerto = function(huertoId) {
+  const usuario = document.getElementById('filtro-usuario-feed')?.value || 'todos';
+  renderizarFeed(huertoId, usuario);
+};
+
+window.filtrarFeedPorUsuario = function(usuarioId) {
+  const huerto = document.getElementById('filtro-huerto-feed')?.value || 'todos';
+  renderizarFeed(huerto, usuarioId);
+};
+
+// 1b. Renderizar Trabajo Diario (Tablero DevOps Kanban 3 Columnas)
+function renderizarDevops(filtroHuerto, filtroUsuario, filtroPeriodo) {
+  const container = document.getElementById('devops-kanban-container');
+  const countBadge = document.getElementById('count-devops');
+  if (!container) return;
+
+  const huertoSel = filtroHuerto !== undefined ? filtroHuerto : (document.getElementById('filtro-huerto-devops')?.value || 'todos');
+  const usuarioSel = filtroUsuario !== undefined ? filtroUsuario : (document.getElementById('filtro-usuario-devops')?.value || 'todos');
+  const periodoSel = filtroPeriodo !== undefined ? filtroPeriodo : (document.getElementById('filtro-periodo-devops')?.value || 'todos');
 
   let faenasFiltradas = [...estado.faenas].sort((a, b) => {
     return new Date(`${b.fecha} ${b.hora || '12:00'}`) - new Date(`${a.fecha} ${a.hora || '12:00'}`);
@@ -478,15 +596,15 @@ function renderizarFeed(filtroHuerto, filtroUsuario, filtroPeriodo) {
   const nFinTotal = faenasFiltradas.filter(f => normalizarEstado(f.estado) === 'Finalizadas').length;
 
   if (countBadge) {
-    countBadge.innerText = `${faenasFiltradas.length} faenas (${nPendTotal} pend. · ${nCurTotal} en curso · ${nFinTotal} fin.)`;
+    countBadge.innerText = `${faenasFiltradas.length} tareas (${nPendTotal} pend. · ${nCurTotal} en curso · ${nFinTotal} fin.)`;
   }
 
   if (faenasFiltradas.length === 0) {
     container.innerHTML = `
       <div style="text-align:center; padding:2.5rem 1rem; color:var(--text-muted); background:var(--bg-card); border-radius:var(--radius-lg);">
-        <p style="font-size:2rem; margin-bottom:0.5rem;">🚜</p>
-        <p>No hay faenas registradas con estos filtros.</p>
-        <button class="btn-new-task" style="margin-top:1rem;" onclick="abrirNuevaFaena()">+ Registrar Primera Faena</button>
+        <p style="font-size:2rem; margin-bottom:0.5rem;">⚡</p>
+        <p>No hay tareas registradas en Trabajo Diario con estos filtros.</p>
+        <button class="btn-new-task" style="margin-top:1rem;" onclick="abrirNuevaFaena()">+ Nueva Tarea</button>
       </div>
     `;
     return;
@@ -509,7 +627,6 @@ function renderizarFeed(filtroHuerto, filtroUsuario, filtroPeriodo) {
   // Ordenar grupos de mes de más reciente a más antiguo
   const clavesOrdenadas = Array.from(gruposMes.keys()).sort().reverse();
 
-  // En la primera carga, colapsar meses anteriores que no tengan tareas activas
   if (!acordeonInicializado && periodoSel === 'todos') {
     clavesOrdenadas.forEach((clave, idx) => {
       if (idx > 0) {
@@ -533,7 +650,6 @@ function renderizarFeed(filtroHuerto, filtroUsuario, filtroPeriodo) {
     const enCurso = faenasGrupo.filter(f => normalizarEstado(f.estado) === 'En curso');
     const finalizadas = faenasGrupo.filter(f => normalizarEstado(f.estado) === 'Finalizadas');
 
-    // Si el usuario filtró por un mes concreto, forzamos que esté abierto
     const estaColapsado = (periodoSel === 'todos') ? mesesColapsados.has(clave) : false;
 
     const tarjetasPendientesHtml = pendientes.length === 0
@@ -554,7 +670,7 @@ function renderizarFeed(filtroHuerto, filtroUsuario, filtroPeriodo) {
           <div class="kanban-month-title">
             <span style="font-size:1.2rem;">📅</span>
             <h3>${grupo.info.etiqueta}</h3>
-            <span class="month-summary-badge">${faenasGrupo.length} faenas</span>
+            <span class="month-summary-badge">${faenasGrupo.length} tareas</span>
             ${pendientes.length > 0 ? `<span class="col-count-pill" style="background:rgba(245,158,11,0.15); color:#fbbf24; font-size:0.7rem;">🟡 ${pendientes.length} pend.</span>` : ''}
             ${enCurso.length > 0 ? `<span class="col-count-pill" style="background:rgba(59,130,246,0.15); color:#60a5fa; font-size:0.7rem;">🔵 ${enCurso.length} en curso</span>` : ''}
           </div>
@@ -634,22 +750,22 @@ function renderizarFeed(filtroHuerto, filtroUsuario, filtroPeriodo) {
   container.innerHTML = htmlGrupos;
 }
 
-window.filtrarFeedPorHuerto = function(huertoId) {
-  const usuario = document.getElementById('filtro-usuario-feed')?.value || 'todos';
-  const periodo = document.getElementById('filtro-periodo-feed')?.value || 'todos';
-  renderizarFeed(huertoId, usuario, periodo);
+window.filtrarDevopsPorHuerto = function(huertoId) {
+  const usuario = document.getElementById('filtro-usuario-devops')?.value || 'todos';
+  const periodo = document.getElementById('filtro-periodo-devops')?.value || 'todos';
+  renderizarDevops(huertoId, usuario, periodo);
 };
 
-window.filtrarFeedPorUsuario = function(usuarioId) {
-  const huerto = document.getElementById('filtro-huerto-feed')?.value || 'todos';
-  const periodo = document.getElementById('filtro-periodo-feed')?.value || 'todos';
-  renderizarFeed(huerto, usuarioId, periodo);
+window.filtrarDevopsPorUsuario = function(usuarioId) {
+  const huerto = document.getElementById('filtro-huerto-devops')?.value || 'todos';
+  const periodo = document.getElementById('filtro-periodo-devops')?.value || 'todos';
+  renderizarDevops(huerto, usuarioId, periodo);
 };
 
-window.filtrarFeedPorPeriodo = function(periodo) {
-  const huerto = document.getElementById('filtro-huerto-feed')?.value || 'todos';
-  const usuario = document.getElementById('filtro-usuario-feed')?.value || 'todos';
-  renderizarFeed(huerto, usuario, periodo);
+window.filtrarDevopsPorPeriodo = function(periodo) {
+  const huerto = document.getElementById('filtro-huerto-devops')?.value || 'todos';
+  const usuario = document.getElementById('filtro-usuario-devops')?.value || 'todos';
+  renderizarDevops(huerto, usuario, periodo);
 };
 
 // 2. Renderizar Catálogo de Parcelas (Baseline - Protegido Anti-XSS)
@@ -717,6 +833,10 @@ function renderizarSelectoresHuertos() {
   const selFeed = document.getElementById('filtro-huerto-feed');
   const selFeedUser = document.getElementById('filtro-usuario-feed');
 
+  const selDevops = document.getElementById('filtro-huerto-devops');
+  const selDevopsUser = document.getElementById('filtro-usuario-devops');
+  const selDevopsPeriodo = document.getElementById('filtro-periodo-devops');
+
   const esc = (window.HuertoSecurity && window.HuertoSecurity.escapeHtml) ? window.HuertoSecurity.escapeHtml : s => (s || '');
   const sanitizeId = (window.HuertoSecurity && window.HuertoSecurity.sanitizeId) ? window.HuertoSecurity.sanitizeId : s => s;
 
@@ -726,22 +846,23 @@ function renderizarSelectoresHuertos() {
     `).join('');
   }
 
-  if (selFeed) {
-    selFeed.innerHTML = `
-      <option value="todos">Todos los huertos (${estado.parcelas.length})</option>
-      ${estado.parcelas.map(p => `<option value="${sanitizeId(p.id)}">${esc(p.nombre)}</option>`).join('')}
-    `;
-  }
+  const optionsHuertos = `
+    <option value="todos">Todos los huertos (${estado.parcelas.length})</option>
+    ${estado.parcelas.map(p => `<option value="${sanitizeId(p.id)}">${esc(p.nombre)}</option>`).join('')}
+  `;
 
-  if (selFeedUser) {
-    selFeedUser.innerHTML = `
-      <option value="todos">Todos los operarios</option>
-      ${USUARIOS.map(u => `<option value="${esc(u.nombre)}">${esc(u.nombre)}</option>`).join('')}
-    `;
-  }
+  if (selFeed) selFeed.innerHTML = optionsHuertos;
+  if (selDevops) selDevops.innerHTML = optionsHuertos;
 
-  const selFeedPeriodo = document.getElementById('filtro-periodo-feed');
-  if (selFeedPeriodo) {
+  const optionsUsers = `
+    <option value="todos">Todos los operarios</option>
+    ${USUARIOS.map(u => `<option value="${esc(u.nombre)}">${esc(u.nombre)}</option>`).join('')}
+  `;
+
+  if (selFeedUser) selFeedUser.innerHTML = optionsUsers;
+  if (selDevopsUser) selDevopsUser.innerHTML = optionsUsers;
+
+  if (selDevopsPeriodo) {
     const periodosMap = new Map();
     estado.faenas.forEach(f => {
       if (f.fecha && f.fecha.length >= 7) {
@@ -751,9 +872,9 @@ function renderizarSelectoresHuertos() {
     });
 
     const periodosOrdenados = Array.from(periodosMap.keys()).sort().reverse();
-    const valorSeleccionado = selFeedPeriodo.value || 'todos';
+    const valorSeleccionado = selDevopsPeriodo.value || 'todos';
 
-    selFeedPeriodo.innerHTML = `
+    selDevopsPeriodo.innerHTML = `
       <option value="todos">📅 Todos los periodos (${estado.faenas.length})</option>
       ${periodosOrdenados.map(p => {
         const info = obtenerInfoMesAno(`${p}-01`);
@@ -763,7 +884,7 @@ function renderizarSelectoresHuertos() {
     `;
 
     if (periodosMap.has(valorSeleccionado) || valorSeleccionado === 'todos') {
-      selFeedPeriodo.value = valorSeleccionado;
+      selDevopsPeriodo.value = valorSeleccionado;
     }
   }
 }
@@ -1268,64 +1389,11 @@ window.gestionarPinSeguridad = async function() {
 };
 
 function iniciarProteccionPrivacidad() {
-  if (!window.HuertoSecurity) return;
-
-  // Si la sesión está marcada como bloqueada, abrir modal
-  if (window.HuertoSecurity.estaSesionBloqueada()) {
-    const modal = document.getElementById('modal-pin-lock');
-    if (modal) modal.classList.remove('hidden');
-  }
-
-  // Setup inputs de 4 dígitos
-  const inputs = [
-    document.getElementById('pin-d1'),
-    document.getElementById('pin-d2'),
-    document.getElementById('pin-d3'),
-    document.getElementById('pin-d4')
-  ];
-
-  inputs.forEach((inp, idx) => {
-    if (!inp) return;
-    inp.addEventListener('input', (e) => {
-      if (e.target.value.length === 1 && idx < 3) {
-        inputs[idx + 1].focus();
-      }
-      if (idx === 3 && e.target.value.length === 1) {
-        comprobarPinEntrada();
-      }
-    });
-    inp.addEventListener('keydown', (e) => {
-      if (e.key === 'Backspace' && !e.target.value && idx > 0) {
-        inputs[idx - 1].focus();
-      }
-    });
-  });
+  // Desactivado en entorno de pruebas según solicitud de Jordi
 }
 
 window.comprobarPinEntrada = async function() {
-  if (!window.HuertoSecurity) return;
-  const d1 = document.getElementById('pin-d1')?.value || '';
-  const d2 = document.getElementById('pin-d2')?.value || '';
-  const d3 = document.getElementById('pin-d3')?.value || '';
-  const d4 = document.getElementById('pin-d4')?.value || '';
-  const pin = d1 + d2 + d3 + d4;
-
-  const valido = await window.HuertoSecurity.verificarPin(pin);
-  const errMsg = document.getElementById('pin-error-msg');
-  if (valido) {
-    window.HuertoSecurity.desbloquearSesion();
-    const modal = document.getElementById('modal-pin-lock');
-    if (modal) modal.classList.add('hidden');
-    if (errMsg) errMsg.style.display = 'none';
-    mostrarToast('Acceso desbloqueado');
-  } else {
-    if (errMsg) errMsg.style.display = 'block';
-    [1, 2, 3, 4].forEach(i => {
-      const el = document.getElementById(`pin-d${i}`);
-      if (el) el.value = '';
-    });
-    document.getElementById('pin-d1')?.focus();
-  }
+  // Desactivado en entorno de pruebas
 };
 
 // ============================================================================
