@@ -5,109 +5,24 @@
 const STORAGE_KEY = 'huertos_carlos_db_v2';
 const USER_KEY = 'huertos_carlos_active_user';
 
-// Usuarios autorizados (los 3 móviles de confianza + admin)
-const USUARIOS = [
-  { id: 'carlos', nombre: 'Carlos', rol: 'Administrador / Propietario', avatar: '👨‍🌾' },
-  { id: 'operario1', nombre: 'Operario 1 (Javier)', rol: 'Equipo de Campo', avatar: '🚜' },
-  { id: 'operario2', nombre: 'Operario 2 (Pepe)', rol: 'Equipo de Campo', avatar: '🌱' }
-];
+// Usuarios autorizados (Carlos, Juan Carlos, Diego y equipo según el Excel)
+const USUARIOS = (typeof window !== 'undefined' && window.DATOS_INICIALES_CARLOS && window.DATOS_INICIALES_CARLOS.usuarios)
+  ? window.DATOS_INICIALES_CARLOS.usuarios
+  : [
+      { id: 'carlos', nombre: 'Carlos', rol: 'Administrador / Propietario', avatar: '👨‍🌾' },
+      { id: 'jc', nombre: 'Juan Carlos (JC)', rol: 'Equipo de Campo', avatar: '🚜' },
+      { id: 'diego', nombre: 'Diego (D)', rol: 'Equipo de Campo', avatar: '🌱' },
+      { id: 'juan', nombre: 'Juan', rol: 'Operario', avatar: '🔧' }
+    ];
 
-// Baseline inicial de parcelas (ejemplo realista que se sustituirá/completará con el Excel)
-const PARCELAS_INICIALES = [
-  {
-    id: 'p-bovalar',
-    nombre: 'Huerto El Bovalar',
-    superficie: '14 Hanegadas (1.16 ha)',
-    variedad: 'Clemenules',
-    patron: 'Citrange Carrizo',
-    marco: '6 x 4 m',
-    ubicacion: 'Partida Bovalar, Pol. 12 Parc. 45',
-    arboles: 520,
-    ultimaFaena: null
-  },
-  {
-    id: 'p-foia',
-    nombre: 'Finca La Foia',
-    superficie: '22 Hanegadas (1.82 ha)',
-    variedad: 'Navelina',
-    patron: 'Citrange Carrizo',
-    marco: '6 x 3.5 m',
-    ubicacion: 'Camino Hondo, Pol. 4 Parc. 112',
-    arboles: 980,
-    ultimaFaena: null
-  },
-  {
-    id: 'p-campillo',
-    nombre: 'Huerto El Campillo',
-    superficie: '8 Hanegadas (0.66 ha)',
-    variedad: 'Lane Late / Valencia Late',
-    patron: 'Citrus Macrophylla',
-    marco: '5.5 x 4 m',
-    ubicacion: 'Cerca del pozo comunal, Pol. 9 Parc. 30',
-    arboles: 340,
-    ultimaFaena: null
-  },
-  {
-    id: 'p-olivar',
-    nombre: 'Bancales del Olivar',
-    superficie: '10 Hanegadas (0.83 ha)',
-    variedad: 'Serrana de Espadán y Picual',
-    patron: 'Franco',
-    marco: '7 x 7 m',
-    ubicacion: 'Partida Solana Alta, Pol. 1 Parc. 8',
-    arboles: 180,
-    ultimaFaena: null
-  }
-];
+// Baseline inicial de parcelas y faenas extraídas del Excel
+const PARCELAS_INICIALES = (typeof window !== 'undefined' && window.DATOS_INICIALES_CARLOS && window.DATOS_INICIALES_CARLOS.parcelas)
+  ? window.DATOS_INICIALES_CARLOS.parcelas
+  : [];
 
-// Faenas históricas iniciales de demostración
-const FAENAS_INICIALES = [
-  {
-    id: 'f-101',
-    fecha: '2026-09-24',
-    hora: '17:30',
-    usuario: 'Carlos',
-    usuarioId: 'carlos',
-    parcelaId: 'p-bovalar',
-    parcelaNombre: 'Huerto El Bovalar',
-    tipoFaena: 'Tratamiento Fitosanitario',
-    quimicoProducto: 'Spintor 480 SC (Spinosad) + Aceite de parafina',
-    quimicoDosis: '25 cc/hl (cuba de 1000 L gastada)',
-    plagas: ['Trip', 'Mosca blanca'],
-    hierba: 'Poca hierba',
-    notas: 'Los árboles tienen brotación fuerte. Visto algo de trip en brotes tiernos de la parte sur del huerto. Tratamiento dado a toda la parcela con pistola y tractor.'
-  },
-  {
-    id: 'f-102',
-    fecha: '2026-09-23',
-    hora: '10:15',
-    usuario: 'Operario 1 (Javier)',
-    usuarioId: 'operario1',
-    parcelaId: 'p-foia',
-    parcelaNombre: 'Finca La Foia',
-    tipoFaena: 'Riego y Abonado',
-    quimicoProducto: 'Nitrato de Calcio + Ácido Fosfórico',
-    quimicoDosis: '25 kg disueltos en abonadora',
-    plagas: [],
-    hierba: 'Limpio',
-    notas: 'Riego de 4 horas por goteo por sectores. Presión del cabezal a 2.5 bar correcta. Goteros revisados sin obstrucciones.'
-  },
-  {
-    id: 'f-103',
-    fecha: '2026-09-21',
-    hora: '18:00',
-    usuario: 'Carlos',
-    usuarioId: 'carlos',
-    parcelaId: 'p-campillo',
-    parcelaNombre: 'Huerto El Campillo',
-    tipoFaena: 'Revisión General',
-    quimicoProducto: '',
-    quimicoDosis: '',
-    plagas: ['Araña roja'],
-    hierba: 'Mucha hierba',
-    notas: 'Mucha hierba tras las últimas lluvias, urge meter desbrozadora o pase de cultivador la semana que viene. Detectado foco aislado de araña roja en el linde este.'
-  }
-];
+const FAENAS_INICIALES = (typeof window !== 'undefined' && window.DATOS_INICIALES_CARLOS && window.DATOS_INICIALES_CARLOS.faenas)
+  ? window.DATOS_INICIALES_CARLOS.faenas
+  : [];
 
 // Estado en memoria
 let estado = {
@@ -132,8 +47,16 @@ function cargarDatos() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      estado.parcelas = parsed.parcelas || PARCELAS_INICIALES;
-      estado.faenas = parsed.faenas || FAENAS_INICIALES;
+      // Si la versión guardada en localStorage tiene menos de 10 parcelas (datos de prueba antiguos),
+      // recargar con los 30 huertos reales y 1175 faenas del Excel
+      if (parsed.parcelas && parsed.parcelas.length >= 20) {
+        estado.parcelas = parsed.parcelas;
+        estado.faenas = parsed.faenas || FAENAS_INICIALES;
+      } else {
+        estado.parcelas = JSON.parse(JSON.stringify(PARCELAS_INICIALES));
+        estado.faenas = JSON.parse(JSON.stringify(FAENAS_INICIALES));
+        guardarDatos();
+      }
     } else {
       estado.parcelas = JSON.parse(JSON.stringify(PARCELAS_INICIALES));
       estado.faenas = JSON.parse(JSON.stringify(FAENAS_INICIALES));
@@ -718,6 +641,15 @@ window.importarDatos = function(event) {
     }
   };
   reader.readAsText(file);
+};
+
+window.restablecerDatosExcel = function() {
+  if (confirm('¿Restablecer el cuaderno de campo con las 30 parcelas y faenas originales del Excel de Carlos?')) {
+    localStorage.removeItem(STORAGE_KEY);
+    cargarDatos();
+    renderizarTodo();
+    mostrarToast('¡Cuaderno de campo restaurado con el Excel de Carlos (30 huertos)!');
+  }
 };
 
 // ============================================================================

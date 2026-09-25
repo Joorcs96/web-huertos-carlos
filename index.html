@@ -264,6 +264,7 @@
         <div style="display:flex; gap:0.75rem; flex-wrap:wrap;">
           <button class="btn-secondary" onclick="exportarDatos()">Descargar Copia (JSON)</button>
           <button class="btn-secondary" onclick="document.getElementById('import-file').click()">Cargar Datos Excel / JSON</button>
+          <button class="btn-secondary" style="border-color:var(--primary); color:var(--primary-light);" onclick="restablecerDatosExcel()">🔄 Restaurar Datos del Excel (30 Huertos)</button>
           <input type="file" id="import-file" style="display:none;" onchange="importarDatos(event)" accept=".json,.csv">
         </div>
       </div>
@@ -338,6 +339,7 @@
 
   <div id="toast-container" class="toast-container"></div>
 
+  <script src="datos_huertos.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
