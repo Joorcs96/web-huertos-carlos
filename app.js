@@ -177,10 +177,11 @@ function actualizarHeaderUsuario() {
 }
 
 // ============================================================================
-// NAVEGACIÓN
+// NAVEGACIÓN ERGONÓMICA
 // ============================================================================
 function iniciarNavegacion() {
   const tabs = document.querySelectorAll('.nav-btn');
+  const fab = document.querySelector('.mobile-fab');
   tabs.forEach(tab => {
     tab.addEventListener('click', () => {
       tabs.forEach(t => t.classList.remove('active'));
@@ -190,6 +191,11 @@ function iniciarNavegacion() {
       const targetId = tab.getAttribute('data-tab');
       const panel = document.getElementById(targetId);
       if (panel) panel.classList.add('active');
+
+      if (fab) {
+        fab.style.display = (targetId === 'tab-nueva') ? 'none' : 'flex';
+      }
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     });
   });
 }

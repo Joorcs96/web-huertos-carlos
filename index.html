@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>Huertos Carlos | Cuaderno de Campo & Faenas</title>
   
   <meta name="description" content="Gestión ágil de parcelas, partes de faenas, control de plagas y tratamientos agrícolas para el equipo de Carlos">
@@ -18,7 +18,7 @@
   <meta http-equiv="Permissions-Policy" content="camera=(), microphone=(), geolocation=(self), payment=(), usb=()">
 
   <link rel="manifest" href="manifest.json">
-  <link rel="stylesheet" href="styles.css?v=4">
+  <link rel="stylesheet" href="styles.css?v=5">
 </head>
 <body>
 
@@ -61,26 +61,37 @@
     </div>
   </header>
 
-  <!-- Barra de Navegación Móvil -->
-  <nav class="nav-bar">
+  <!-- Barra de Navegación Ergonómica (Inferior en Móvil, Superior en Escritorio) -->
+  <nav class="nav-bar" id="bottom-nav">
     <div class="nav-container">
       <button class="nav-btn active" data-tab="tab-feed">
-        <span>📋 Histórico</span>
+        <span class="nav-icon">📋</span>
+        <span class="nav-label">Histórico</span>
       </button>
       <button class="nav-btn" data-tab="tab-devops">
-        <span>⚡ Trabajo Diario</span>
+        <span class="nav-icon">⚡</span>
+        <span class="nav-label">Diario</span>
       </button>
       <button class="nav-btn" data-tab="tab-parcelas">
-        <span>🍊 Mis Huertos</span>
+        <span class="nav-icon">🍊</span>
+        <span class="nav-label">Huertos</span>
       </button>
       <button class="nav-btn" data-tab="tab-nueva">
-        <span>✍️ Registrar Faena</span>
+        <span class="nav-icon">✍️</span>
+        <span class="nav-label">Nueva</span>
       </button>
       <button class="nav-btn" data-tab="tab-resumen">
-        <span>📊 Resumen & Plagas</span>
+        <span class="nav-icon">📊</span>
+        <span class="nav-label">Resumen</span>
       </button>
     </div>
   </nav>
+
+  <!-- Botón Flotante Ergonómico de Acción Rápida (Thumb Zone) para Móviles -->
+  <button class="mobile-fab" onclick="abrirNuevaFaena()" title="Registrar nueva faena" aria-label="Nueva Faena">
+    <span class="fab-icon">➕</span>
+    <span class="fab-label">Nueva Faena</span>
+  </button>
 
   <!-- Contenedor Principal -->
   <main class="main-content">
@@ -403,9 +414,9 @@
   <div id="toast-container" class="toast-container"></div>
 
   <!-- Scripts de la Aplicación -->
-  <script src="security.js?v=4"></script>
-  <script src="datos_huertos.js?v=4"></script>
-  <script src="app.js?v=4"></script>
+  <script src="security.js?v=5"></script>
+  <script src="datos_huertos.js?v=5"></script>
+  <script src="app.js?v=5"></script>
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
