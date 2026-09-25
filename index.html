@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Huerto de Carlos | Control y Telemetría</title>
+  
+  <meta name="description" content="Aplicación web de control de riego inteligente y telemetría para el huerto de Carlos">
+  <meta name="theme-color" content="#16a34a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  
+  <link rel="manifest" href="manifest.json">
+  <link rel="stylesheet" href="styles.css">
+  
+  <!-- Chart.js para telemetría visual -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+  <!-- Cabecera Principal -->
+  <header class="top-header">
+    <div class="header-container">
+      <div class="brand-area">
+        <div class="logo-badge">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2a10 10 0 0 1 10 10c0 5.523-4.477 10-10 10S2 17.523 2 12c0-5.523 4.477-10 10-10z"></path>
+            <path d="M12 6v6l4 2"></path>
+            <path d="M12 18a6 6 0 0 0 6-6"></path>
+          </svg>
+        </div>
+        <div class="brand-titles">
+          <h1>Huerto de Carlos</h1>
+          <p>Control y Telemetría Inteligente</p>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <div class="status-chip">
+          <div id="estado-dot" class="pulse-dot"></div>
+          <span id="estado-modo">Modo Demo</span>
+        </div>
+        <button class="btn-emergency" onclick="paradaEmergencia()" title="Cerrar de inmediato todas las electroválvulas">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+          </svg>
+          <span>Parada Total</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Barra de Navegación Móvil y Escritorio -->
+  <nav class="nav-bar">
+    <div class="nav-container">
+      <button class="nav-btn active" data-tab="tab-dashboard">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="3" width="7" height="7"></rect>
+          <rect x="14" y="3" width="7" height="7"></rect>
+          <rect x="14" y="14" width="7" height="7"></rect>
+          <rect x="3" y="14" width="7" height="7"></rect>
+        </svg>
+        <span>Bancales & Riego</span>
+      </button>
+      <button class="nav-btn" data-tab="tab-programador">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"></circle>
+          <polyline points="12 6 12 12 16 14"></polyline>
+        </svg>
+        <span>Programador</span>
+      </button>
+      <button class="nav-btn" data-tab="tab-graficas">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+        </svg>
+        <span>Telemetría</span>
+      </button>
+      <button class="nav-btn" data-tab="tab-hardware">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect>
+          <rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect>
+          <line x1="6" y1="6" x2="6.01" y2="6"></line>
+          <line x1="6" y1="18" x2="6.01" y2="18"></line>
+        </svg>
+        <span>Hardware IoT</span>
+      </button>
+    </div>
+  </nav>
+
+  <!-- Contenido Central -->
+  <main class="main-content">
+
+    <!-- Pestaña 1: Dashboard y Bancales -->
+    <div id="tab-dashboard" class="tab-panel active">
+      
+      <!-- Tira de Métricas Clave -->
+      <section class="metrics-strip">
+        <div class="metric-card">
+          <div class="metric-icon water">🚰</div>
+          <div class="metric-info" style="flex:1;">
+            <span class="metric-label">Depósito de Agua</span>
+            <div id="val-deposito" class="metric-val">835 L (84%)</div>
+            <div class="tank-visual">
+              <div id="fill-deposito" class="tank-fill" style="width: 84%;"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="metric-card">
+          <div class="metric-icon temp">🌡️</div>
+          <div class="metric-info">
+            <span class="metric-label">Temperatura Huerto</span>
+            <div id="val-temp" class="metric-val">23.4°C</div>
+            <span class="metric-sub">Ambiente exterior</span>
+          </div>
+        </div>
+
+        <div class="metric-card">
+          <div class="metric-icon sun">☀️</div>
+          <div class="metric-info">
+            <span class="metric-label">Humedad Aire</span>
+            <div id="val-humedad" class="metric-val">54%</div>
+            <span class="metric-sub">Sin riesgo de lluvia</span>
+          </div>
+        </div>
+
+        <div class="metric-card">
+          <div class="metric-icon soil">💧</div>
+          <div class="metric-info">
+            <span class="metric-label">Consumo de Hoy</span>
+            <div id="val-consumo" class="metric-val">42 L</div>
+            <span class="metric-sub">Riego eficiente</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Grid de Bancales y Zonas de Cultivo -->
+      <section>
+        <div class="section-head">
+          <h2>
+            <span>🌱</span>
+            <span>Sectores de Cultivo de Carlos</span>
+          </h2>
+        </div>
+
+        <div id="zonas-container" class="zones-grid">
+          <!-- Renderizado dinámico desde app.js -->
+        </div>
+      </section>
+    </div>
+
+    <!-- Pestaña 2: Programador de Riegos -->
+    <div id="tab-programador" class="tab-panel">
+      <div class="schedule-container">
+        <div class="card">
+          <h3>
+            <span>⏰</span>
+            <span>Horarios y Automatizaciones Activas</span>
+          </h3>
+          <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:1.25rem;">
+            Los programas automáticos activan el riego a las horas programadas siempre que la humedad del suelo esté por debajo del umbral óptimo y el depósito tenga nivel seguro.
+          </p>
+
+          <div id="programas-container">
+            <!-- Renderizado dinámico desde app.js -->
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>
+            <span>🛡️</span>
+            <span>Seguridad de Riego Inteligente</span>
+          </h3>
+          <ul style="font-size:0.85rem; color:var(--text-muted); padding-left:1.25rem; display:flex; flex-direction:column; gap:0.6rem;">
+            <li><strong>Corte por Depósito Bajo:</strong> El sistema suspende los riegos automáticos si el agua baja del 15% para proteger las bombas.</li>
+            <li><strong>Temporizador de Respaldo Físico:</strong> Las electroválvulas tienen un apagado máximo de seguridad (20 min) en caso de fallo de red.</li>
+            <li><strong>Modo Lluvia:</strong> Se desactiva el riego si el higrómetro detecta saturación o lluvia reciente.</li>
+            <li><strong>Control Horario Nocturno:</strong> Prioriza las horas de menor evaporación (amanecer y anochecer) para ahorrar agua.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- Pestaña 3: Gráficas y Telemetría -->
+    <div id="tab-graficas" class="tab-panel">
+      <div class="chart-box">
+        <div class="section-head" style="margin-bottom:0.5rem;">
+          <h2>
+            <span>📊</span>
+            <span>Evolución de Humedad del Suelo (24h)</span>
+          </h2>
+        </div>
+        <p style="font-size:0.8rem; color:var(--text-muted);">
+          Monitoriza los ciclos de absorción radicular de cada bancal para evitar encharcamientos o estrés hídrico.
+        </p>
+        <div class="chart-canvas-wrap">
+          <canvas id="chartHumedadCanvas"></canvas>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>
+          <span>📋</span>
+          <span>Registro Histórico de Riegos</span>
+        </h3>
+        <div class="log-table-wrap">
+          <table class="log-table">
+            <thead>
+              <tr>
+                <th>Momento</th>
+                <th>Sector</th>
+                <th>Duración</th>
+                <th>Litros Estimados</th>
+                <th>Tipo</th>
+              </tr>
+            </thead>
+            <tbody id="historico-tbody">
+              <!-- Renderizado dinámico desde app.js -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Pestaña 4: Hardware y Configuración IoT -->
+    <div id="tab-hardware" class="tab-panel">
+      <div class="schedule-container">
+        <div class="card">
+          <h3>
+            <span>⚙️</span>
+            <span>Enlace con Dispositivo IoT</span>
+          </h3>
+          
+          <form id="form-config-hardware">
+            <div class="form-group">
+              <label class="form-label">Modo de Operación</label>
+              <select id="cfg-modo" class="form-select">
+                <option value="demo">Modo Simulación (Prueba interactiva)</option>
+                <option value="esp32">ESP32 / Microcontrolador Real (WiFi)</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Dirección IP o URL del ESP32 / Gateway</label>
+              <input type="text" id="cfg-url" class="form-input" placeholder="http://192.168.1.150">
+              <span style="font-size:0.7rem; color:var(--text-subtle);">IP asignada en la red local del huerto o túnel DDNS/Tailscale</span>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">API Key / Token de Seguridad (Opcional)</label>
+              <input type="password" id="cfg-key" class="form-input" placeholder="Clave secreta si está activada">
+            </div>
+
+            <div style="display:flex; gap:0.75rem; margin-top:1.25rem;">
+              <button type="submit" class="btn-primary">Guardar Configuración</button>
+              <button type="button" id="btn-test-esp32" class="btn-secondary">Test Conexión</button>
+            </div>
+          </form>
+        </div>
+
+        <div class="card">
+          <h3>
+            <span>🔌</span>
+            <span>Guía de Hardware y Sensores</span>
+          </h3>
+          <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:0.75rem;">
+            Para conectar el huerto físico de Carlos con la web, el proyecto incluye el firmware listo para flashear en un ESP32 en la carpeta <code>hardware/esp32_huerto_carlos.ino</code>.
+          </p>
+          <div style="background-color:var(--bg-surface); padding:0.85rem; border-radius:var(--radius-sm); font-size:0.8rem; font-family:monospace; color:var(--text-muted);">
+            <div>• ESP32 NodeMCU / WROOM-32</div>
+            <div>• 4x Sensores capacitivos de humedad v1.2</div>
+            <div>• 1x Módulo 4 Relés 5V (electroválvulas 12V/24V)</div>
+            <div>• 1x Sensor DHT22 / BME280 (Temp/Humedad)</div>
+            <div>• 1x Sensor ultrasonidos HC-SR04 (Nivel depósito)</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- Pie de Página -->
+  <footer>
+    <p>Huerto de Carlos · Creado con ❤️ por Jordi para monitorización agrícola sostenible</p>
+  </footer>
+
+  <!-- Contenedor de Alertas Toast -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+# Dependencias y entornos
+node_modules/
+dist/
+.DS_Store
+Thumbs.db
+
+# Logs y entornos locales
+*.log
+.env
+.env.local
+
+# IDEs
+.vscode/
+.idea/
