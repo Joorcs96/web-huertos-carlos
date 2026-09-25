@@ -1,9 +1,10 @@
-const CACHE_NAME = 'huerto-carlos-v1';
+const CACHE_NAME = 'huerto-carlos-v2';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
   './styles.css',
   './app.js',
+  './datos_huertos.js',
   './manifest.json'
 ];
 

@@ -11,7 +11,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   
   <link rel="manifest" href="manifest.json">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=2">
 </head>
 <body>
 
@@ -75,17 +75,22 @@
   <!-- Contenedor Principal -->
   <main class="main-content">
 
-    <!-- Pestaña 1: Muro de Actividad / Últimas Faenas -->
+    <!-- Pestaña 1: Muro de Actividad / Tablero de Faenas (Kanban) -->
     <div id="tab-feed" class="tab-panel active">
       <div class="section-head">
         <h2>
           <span>📢</span>
-          <span>Últimas Faenas Realizadas</span>
+          <span>Muro de Faenas</span>
         </h2>
-        <span class="badge-count" id="count-faenas">0 faenas</span>
+        <div class="section-head-actions">
+          <span class="badge-count" id="count-faenas">0 faenas</span>
+          <button type="button" class="btn-toggle-all" onclick="toggleTodosLosMeses()" title="Plegar o desplegar todos los meses">
+            <span>↕️ Plegar / Desplegar</span>
+          </button>
+        </div>
       </div>
 
-      <!-- Filtro rápido por huerto -->
+      <!-- Filtros: Huerto, Operario y Periodo (Mes/Año) -->
       <div class="filter-bar">
         <select id="filtro-huerto-feed" class="form-select-sm" onchange="filtrarFeedPorHuerto(this.value)">
           <option value="todos">Todos los huertos</option>
@@ -93,10 +98,13 @@
         <select id="filtro-usuario-feed" class="form-select-sm" onchange="filtrarFeedPorUsuario(this.value)">
           <option value="todos">Todos los operarios</option>
         </select>
+        <select id="filtro-periodo-feed" class="form-select-sm" onchange="filtrarFeedPorPeriodo(this.value)">
+          <option value="todos">Todos los periodos</option>
+        </select>
       </div>
 
-      <div id="feed-container" class="feed-list">
-        <!-- Renderizado de partes de faena -->
+      <div id="feed-container" class="feed-container-kanban">
+        <!-- Renderizado dinámico de partes de faena agrupadas por mes y columnas Kanban -->
       </div>
     </div>
 
@@ -136,6 +144,25 @@
             <div class="form-group">
               <label class="form-label">Fecha *</label>
               <input type="date" id="faena-fecha" class="form-input" required>
+            </div>
+          </div>
+
+          <!-- Estado de la Faena (DevOps / Kanban) -->
+          <div class="form-group">
+            <label class="form-label">Estado de la Faena *</label>
+            <div class="radio-chips-grid" id="faena-estado-selector">
+              <label class="radio-chip chip-pendientes">
+                <input type="radio" name="faena-estado" value="Pendientes">
+                <span>🟡 Pendiente</span>
+              </label>
+              <label class="radio-chip chip-en-curso">
+                <input type="radio" name="faena-estado" value="En curso">
+                <span>🔵 En curso</span>
+              </label>
+              <label class="radio-chip chip-finalizadas">
+                <input type="radio" name="faena-estado" value="Finalizadas" checked>
+                <span>🟢 Finalizada</span>
+              </label>
             </div>
           </div>
 
@@ -339,7 +366,18 @@
 
   <div id="toast-container" class="toast-container"></div>
 
-  <script src="datos_huertos.js"></script>
-  <script src="app.js"></script>
+  <script src="datos_huertos.js?v=2"></script>
+  <script src="app.js?v=2"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js').then((reg) => {
+          reg.update();
+        }).catch((err) => {
+          console.warn('SW registration:', err);
+        });
+      });
+    }
+  </script>
 </body>
 </html>

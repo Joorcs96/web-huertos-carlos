@@ -67,6 +67,13 @@ function cargarDatos() {
     estado.parcelas = JSON.parse(JSON.stringify(PARCELAS_INICIALES));
     estado.faenas = JSON.parse(JSON.stringify(FAENAS_INICIALES));
   }
+
+  // Garantizar que toda faena histórica o existente tenga estado 'Finalizadas' por defecto
+  if (Array.isArray(estado.faenas)) {
+    estado.faenas.forEach(f => {
+      f.estado = normalizarEstado(f.estado || 'Finalizadas');
+    });
+  }
 }
 
 function guardarDatos() {
@@ -186,74 +193,184 @@ function renderizarTodo() {
   renderizarSemaforo();
 }
 
-// 1. Renderizar Feed de Faenas
-function renderizarFeed(filtroHuerto = 'todos', filtroUsuario = 'todos') {
-  const container = document.getElementById('feed-container');
-  const countBadge = document.getElementById('count-faenas');
-  if (!container) return;
+// ============================================================================
+// HELPERS KANBAN & PERIODOS (AÑO Y MES)
+// ============================================================================
+const MESES_ES = [
+  'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+  'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
+];
 
-  let faenasFiltradas = [...estado.faenas].sort((a, b) => {
-    return new Date(`${b.fecha} ${b.hora || '12:00'}`) - new Date(`${a.fecha} ${a.hora || '12:00'}`);
+function normalizarEstado(estado) {
+  if (!estado) return 'Finalizadas';
+  const norm = String(estado).trim().toLowerCase();
+  if (norm.startsWith('pend')) return 'Pendientes';
+  if (norm.includes('curso') || norm.includes('proceso')) return 'En curso';
+  if (norm.startsWith('fin') || norm.startsWith('hech') || norm.startsWith('complet')) return 'Finalizadas';
+  return 'Finalizadas';
+}
+
+function obtenerInfoMesAno(fechaStr) {
+  if (!fechaStr) return { clave: 'sin-fecha', etiqueta: 'Sin fecha', ano: 0, mes: 0 };
+  const partes = fechaStr.split('-');
+  if (partes.length >= 2) {
+    const ano = parseInt(partes[0], 10);
+    const mesIndex = parseInt(partes[1], 10) - 1;
+    const nombreMes = MESES_ES[mesIndex] || partes[1];
+    return {
+      clave: `${partes[0]}-${partes[1]}`,
+      etiqueta: `${nombreMes} ${ano}`,
+      ano: ano,
+      mes: mesIndex + 1
+    };
+  }
+  return { clave: 'desconocido', etiqueta: fechaStr, ano: 0, mes: 0 };
+}
+
+// Control de meses colapsados en el acordeón
+const mesesColapsados = new Set();
+let acordeonInicializado = false;
+
+window.toggleMesAcordeon = function(periodoClave) {
+  if (mesesColapsados.has(periodoClave)) {
+    mesesColapsados.delete(periodoClave);
+  } else {
+    mesesColapsados.add(periodoClave);
+  }
+  const el = document.getElementById(`month-group-${periodoClave}`);
+  if (el) {
+    el.classList.toggle('collapsed');
+  }
+};
+
+window.toggleTodosLosMeses = function() {
+  const groups = document.querySelectorAll('.kanban-month-group');
+  if (!groups || groups.length === 0) return;
+  const algunAbierto = Array.from(groups).some(g => !g.classList.contains('collapsed'));
+  groups.forEach(g => {
+    const periodo = g.getAttribute('data-periodo');
+    if (algunAbierto) {
+      g.classList.add('collapsed');
+      if (periodo) mesesColapsados.add(periodo);
+    } else {
+      g.classList.remove('collapsed');
+      if (periodo) mesesColapsados.delete(periodo);
+    }
   });
+};
 
-  if (filtroHuerto !== 'todos') {
-    faenasFiltradas = faenasFiltradas.filter(f => f.parcelaId === filtroHuerto);
+window.scrollHaciaColumna = function(periodoClave, estadoNombre) {
+  const colId = `col-${periodoClave}-${estadoNombre.replace(/\s+/g, '-')}`;
+  const col = document.getElementById(colId);
+  if (col) {
+    col.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+    const switcher = document.getElementById(`switcher-${periodoClave}`);
+    if (switcher) {
+      switcher.querySelectorAll('.col-switch-btn').forEach(btn => btn.classList.remove('active'));
+      const activeBtn = switcher.querySelector(`[data-target="${estadoNombre}"]`);
+      if (activeBtn) activeBtn.classList.add('active');
+    }
   }
-  if (filtroUsuario !== 'todos') {
-    faenasFiltradas = faenasFiltradas.filter(f => f.usuarioId === filtroUsuario || f.usuario === filtroUsuario);
+};
+
+// Drag and drop para escritorio
+window.onFaenaDragStart = function(event, faenaId) {
+  if (event && event.dataTransfer) {
+    event.dataTransfer.setData('text/plain', faenaId);
+    event.dataTransfer.effectAllowed = 'move';
+  }
+};
+
+window.onFaenaDragOver = function(event) {
+  if (event) {
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+    const col = event.currentTarget;
+    if (col && !col.classList.contains('drag-over')) {
+      col.classList.add('drag-over');
+    }
+  }
+};
+
+window.onFaenaDragLeave = function(event) {
+  if (event && event.currentTarget) {
+    event.currentTarget.classList.remove('drag-over');
+  }
+};
+
+window.onFaenaDrop = function(event, nuevoEstado) {
+  if (event) {
+    event.preventDefault();
+    if (event.currentTarget) event.currentTarget.classList.remove('drag-over');
+    const faenaId = event.dataTransfer ? event.dataTransfer.getData('text/plain') : null;
+    if (faenaId) {
+      cambiarEstadoFaena(faenaId, nuevoEstado);
+    }
+  }
+};
+
+// Cambio de estado con 1 clic desde móvil o acción directa
+window.cambiarEstadoFaena = function(faenaId, nuevoEstado, event) {
+  if (event) {
+    event.stopPropagation();
+    event.preventDefault();
+  }
+  const faena = estado.faenas.find(f => f.id === faenaId);
+  if (!faena) return;
+
+  const estadoNormalizado = normalizarEstado(nuevoEstado);
+  if (normalizarEstado(faena.estado) === estadoNormalizado) return;
+
+  faena.estado = estadoNormalizado;
+  guardarDatos();
+
+  // Preservar la posición vertical del scroll para evitar saltos en móvil
+  const scrollActual = window.scrollY;
+
+  renderizarFeed();
+
+  // Restaurar posición de scroll
+  window.scrollTo(0, scrollActual);
+
+  mostrarToast(`Faena en ${faena.parcelaNombre} movida a "${estadoNormalizado}"`);
+};
+
+// Generador de Tarjeta de Faena con Botones de 1 Clic
+function generarTarjetaFaenaHtml(f) {
+  // Tags de plagas detectadas
+  let tagsPlagasHtml = '';
+  if (f.plagas && f.plagas.length > 0) {
+    f.plagas.forEach(p => {
+      tagsPlagasHtml += `<span class="tag-plaga">⚠️ ${p}</span>`;
+    });
   }
 
-  if (countBadge) {
-    countBadge.innerText = `${faenasFiltradas.length} parte(s)`;
+  // Tag de estado de hierba
+  let tagHierbaHtml = '';
+  if (f.hierba === 'Limpio') {
+    tagHierbaHtml = `<span class="tag-hierba limpio">🟢 Sin hierba</span>`;
+  } else if (f.hierba === 'Poca hierba') {
+    tagHierbaHtml = `<span class="tag-hierba poca">🟡 Poca hierba</span>`;
+  } else if (f.hierba === 'Mucha hierba') {
+    tagHierbaHtml = `<span class="tag-hierba mucha">🔴 Mucha hierba</span>`;
   }
 
-  if (faenasFiltradas.length === 0) {
-    container.innerHTML = `
-      <div style="text-align:center; padding:2.5rem 1rem; color:var(--text-muted); background:var(--bg-card); border-radius:var(--radius-lg);">
-        <p style="font-size:2rem; margin-bottom:0.5rem;">🚜</p>
-        <p>No hay faenas registradas con estos filtros.</p>
-        <button class="btn-new-task" style="margin-top:1rem;" onclick="abrirNuevaFaena()">+ Registrar Primera Faena</button>
+  // Badge químico
+  let quimicoHtml = '';
+  if (f.quimicoProducto) {
+    quimicoHtml = `
+      <div class="feed-quimicos-badge">
+        <span>🧪</span>
+        <strong>${f.quimicoProducto}</strong>
+        ${f.quimicoDosis ? `(${f.quimicoDosis})` : ''}
       </div>
     `;
-    return;
   }
 
-  container.innerHTML = '';
-  faenasFiltradas.forEach(f => {
-    const card = document.createElement('div');
-    card.className = 'feed-card';
+  const estadoActual = normalizarEstado(f.estado);
 
-    // Tags de plagas detectadas
-    let tagsPlagasHtml = '';
-    if (f.plagas && f.plagas.length > 0) {
-      f.plagas.forEach(p => {
-        tagsPlagasHtml += `<span class="tag-plaga">⚠️ ${p}</span>`;
-      });
-    }
-
-    // Tag de estado de hierba
-    let tagHierbaHtml = '';
-    if (f.hierba === 'Limpio') {
-      tagHierbaHtml = `<span class="tag-hierba limpio">🟢 Sin hierba</span>`;
-    } else if (f.hierba === 'Poca hierba') {
-      tagHierbaHtml = `<span class="tag-hierba poca">🟡 Poca hierba</span>`;
-    } else if (f.hierba === 'Mucha hierba') {
-      tagHierbaHtml = `<span class="tag-hierba mucha">🔴 Mucha hierba</span>`;
-    }
-
-    // Badge químico
-    let quimicoHtml = '';
-    if (f.quimicoProducto) {
-      quimicoHtml = `
-        <div class="feed-quimicos-badge">
-          <span>🧪</span>
-          <strong>${f.quimicoProducto}</strong>
-          ${f.quimicoDosis ? `(${f.quimicoDosis})` : ''}
-        </div>
-      `;
-    }
-
-    card.innerHTML = `
+  return `
+    <div class="feed-card" draggable="true" ondragstart="onFaenaDragStart(event, '${f.id}')" id="card-${f.id}">
       <div class="feed-header">
         <div class="feed-title-wrap">
           <strong>${f.parcelaNombre}</strong>
@@ -274,19 +391,240 @@ function renderizarFeed(filtroHuerto = 'todos', filtroUsuario = 'todos') {
       </div>
 
       ${f.notas ? `<div class="feed-notas">"${f.notas}"</div>` : ''}
-    `;
-    container.appendChild(card);
+
+      <div class="card-status-bar">
+        <div class="status-bar-header">
+          <span>Estado:</span>
+          <span style="font-weight:700; color: ${estadoActual === 'Pendientes' ? 'var(--warning)' : estadoActual === 'En curso' ? '#60a5fa' : 'var(--primary-light)'}">
+            ${estadoActual === 'Pendientes' ? '🟡 Pendiente' : estadoActual === 'En curso' ? '🔵 En curso' : '🟢 Finalizada'}
+          </span>
+        </div>
+        <div class="status-btn-group">
+          <button type="button" 
+                  class="btn-status ${estadoActual === 'Pendientes' ? 'active pendientes' : ''}" 
+                  onclick="cambiarEstadoFaena('${f.id}', 'Pendientes', event)" 
+                  title="Marcar como Pendiente">
+            🟡 Pendiente
+          </button>
+          <button type="button" 
+                  class="btn-status ${estadoActual === 'En curso' ? 'active en-curso' : ''}" 
+                  onclick="cambiarEstadoFaena('${f.id}', 'En curso', event)" 
+                  title="Marcar como En curso">
+            🔵 En curso
+          </button>
+          <button type="button" 
+                  class="btn-status ${estadoActual === 'Finalizadas' ? 'active finalizadas' : ''}" 
+                  onclick="cambiarEstadoFaena('${f.id}', 'Finalizadas', event)" 
+                  title="Marcar como Finalizada">
+            🟢 Finalizada
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+// 1. Renderizar Feed de Faenas (Agrupado por Año/Mes y Tablero Kanban de 3 columnas)
+function renderizarFeed(filtroHuerto, filtroUsuario, filtroPeriodo) {
+  const container = document.getElementById('feed-container');
+  const countBadge = document.getElementById('count-faenas');
+  if (!container) return;
+
+  const huertoSel = filtroHuerto !== undefined ? filtroHuerto : (document.getElementById('filtro-huerto-feed')?.value || 'todos');
+  const usuarioSel = filtroUsuario !== undefined ? filtroUsuario : (document.getElementById('filtro-usuario-feed')?.value || 'todos');
+  const periodoSel = filtroPeriodo !== undefined ? filtroPeriodo : (document.getElementById('filtro-periodo-feed')?.value || 'todos');
+
+  let faenasFiltradas = [...estado.faenas].sort((a, b) => {
+    return new Date(`${b.fecha} ${b.hora || '12:00'}`) - new Date(`${a.fecha} ${a.hora || '12:00'}`);
   });
+
+  if (huertoSel !== 'todos') {
+    faenasFiltradas = faenasFiltradas.filter(f => f.parcelaId === huertoSel);
+  }
+  if (usuarioSel !== 'todos') {
+    faenasFiltradas = faenasFiltradas.filter(f => f.usuarioId === usuarioSel || f.usuario === usuarioSel);
+  }
+  if (periodoSel !== 'todos') {
+    faenasFiltradas = faenasFiltradas.filter(f => f.fecha && f.fecha.startsWith(periodoSel));
+  }
+
+  const nPendTotal = faenasFiltradas.filter(f => normalizarEstado(f.estado) === 'Pendientes').length;
+  const nCurTotal = faenasFiltradas.filter(f => normalizarEstado(f.estado) === 'En curso').length;
+  const nFinTotal = faenasFiltradas.filter(f => normalizarEstado(f.estado) === 'Finalizadas').length;
+
+  if (countBadge) {
+    countBadge.innerText = `${faenasFiltradas.length} faenas (${nPendTotal} pend. · ${nCurTotal} en curso · ${nFinTotal} fin.)`;
+  }
+
+  if (faenasFiltradas.length === 0) {
+    container.innerHTML = `
+      <div style="text-align:center; padding:2.5rem 1rem; color:var(--text-muted); background:var(--bg-card); border-radius:var(--radius-lg);">
+        <p style="font-size:2rem; margin-bottom:0.5rem;">🚜</p>
+        <p>No hay faenas registradas con estos filtros.</p>
+        <button class="btn-new-task" style="margin-top:1rem;" onclick="abrirNuevaFaena()">+ Registrar Primera Faena</button>
+      </div>
+    `;
+    return;
+  }
+
+  // Agrupar faenas por Año y Mes (usando f.fecha YYYY-MM)
+  const gruposMes = new Map();
+  faenasFiltradas.forEach(f => {
+    const clave = (f.fecha && f.fecha.length >= 7) ? f.fecha.slice(0, 7) : 'sin-fecha';
+    if (!gruposMes.has(clave)) {
+      gruposMes.set(clave, {
+        clave: clave,
+        info: obtenerInfoMesAno(f.fecha),
+        faenas: []
+      });
+    }
+    gruposMes.get(clave).faenas.push(f);
+  });
+
+  // Ordenar grupos de mes de más reciente a más antiguo
+  const clavesOrdenadas = Array.from(gruposMes.keys()).sort().reverse();
+
+  // En la primera carga, colapsar meses anteriores que no tengan tareas activas
+  if (!acordeonInicializado && periodoSel === 'todos') {
+    clavesOrdenadas.forEach((clave, idx) => {
+      if (idx > 0) {
+        const faenasGrupo = gruposMes.get(clave).faenas;
+        const tieneActivas = faenasGrupo.some(f => normalizarEstado(f.estado) !== 'Finalizadas');
+        if (!tieneActivas) {
+          mesesColapsados.add(clave);
+        }
+      }
+    });
+    acordeonInicializado = true;
+  }
+
+  let htmlGrupos = '';
+
+  clavesOrdenadas.forEach(clave => {
+    const grupo = gruposMes.get(clave);
+    const faenasGrupo = grupo.faenas;
+
+    const pendientes = faenasGrupo.filter(f => normalizarEstado(f.estado) === 'Pendientes');
+    const enCurso = faenasGrupo.filter(f => normalizarEstado(f.estado) === 'En curso');
+    const finalizadas = faenasGrupo.filter(f => normalizarEstado(f.estado) === 'Finalizadas');
+
+    // Si el usuario filtró por un mes concreto, forzamos que esté abierto
+    const estaColapsado = (periodoSel === 'todos') ? mesesColapsados.has(clave) : false;
+
+    const tarjetasPendientesHtml = pendientes.length === 0
+      ? `<div class="kanban-empty-col">Sin faenas pendientes</div>`
+      : pendientes.map(generarTarjetaFaenaHtml).join('');
+
+    const tarjetasEnCursoHtml = enCurso.length === 0
+      ? `<div class="kanban-empty-col">Sin faenas en curso</div>`
+      : enCurso.map(generarTarjetaFaenaHtml).join('');
+
+    const tarjetasFinalizadasHtml = finalizadas.length === 0
+      ? `<div class="kanban-empty-col">Sin faenas finalizadas</div>`
+      : finalizadas.map(generarTarjetaFaenaHtml).join('');
+
+    htmlGrupos += `
+      <div class="kanban-month-group ${estaColapsado ? 'collapsed' : ''}" id="month-group-${clave}" data-periodo="${clave}">
+        <div class="kanban-month-header" onclick="toggleMesAcordeon('${clave}')">
+          <div class="kanban-month-title">
+            <span style="font-size:1.2rem;">📅</span>
+            <h3>${grupo.info.etiqueta}</h3>
+            <span class="month-summary-badge">${faenasGrupo.length} faenas</span>
+            ${pendientes.length > 0 ? `<span class="col-count-pill" style="background:rgba(245,158,11,0.15); color:#fbbf24; font-size:0.7rem;">🟡 ${pendientes.length} pend.</span>` : ''}
+            ${enCurso.length > 0 ? `<span class="col-count-pill" style="background:rgba(59,130,246,0.15); color:#60a5fa; font-size:0.7rem;">🔵 ${enCurso.length} en curso</span>` : ''}
+          </div>
+          <div style="display:flex; align-items:center; gap:0.5rem;">
+            <span class="toggle-arrow">▼</span>
+          </div>
+        </div>
+
+        <div class="kanban-month-body">
+          <!-- Selector rápido de columna para móvil -->
+          <div class="mobile-col-switcher" id="switcher-${clave}">
+            <button type="button" class="col-switch-btn active" data-target="Pendientes" onclick="scrollHaciaColumna('${clave}', 'Pendientes')">
+              🟡 Pendientes (${pendientes.length})
+            </button>
+            <button type="button" class="col-switch-btn" data-target="En curso" onclick="scrollHaciaColumna('${clave}', 'En curso')">
+              🔵 En curso (${enCurso.length})
+            </button>
+            <button type="button" class="col-switch-btn" data-target="Finalizadas" onclick="scrollHaciaColumna('${clave}', 'Finalizadas')">
+              🟢 Finalizadas (${finalizadas.length})
+            </button>
+          </div>
+
+          <!-- Tablero Kanban de 3 columnas -->
+          <div class="kanban-board" id="board-${clave}">
+            
+            <!-- Columna 1: Pendientes -->
+            <div class="kanban-column col-pendientes" id="col-${clave}-Pendientes" 
+                 ondragover="onFaenaDragOver(event)" ondragleave="onFaenaDragLeave(event)" ondrop="onFaenaDrop(event, 'Pendientes')">
+              <div class="kanban-column-header">
+                <div class="kanban-column-title-wrap">
+                  <span>🟡</span>
+                  <h4>Pendientes</h4>
+                </div>
+                <span class="col-count-pill">${pendientes.length}</span>
+              </div>
+              <div class="kanban-cards-list" id="cards-${clave}-Pendientes">
+                ${tarjetasPendientesHtml}
+              </div>
+            </div>
+
+            <!-- Columna 2: En curso -->
+            <div class="kanban-column col-en-curso" id="col-${clave}-En-curso"
+                 ondragover="onFaenaDragOver(event)" ondragleave="onFaenaDragLeave(event)" ondrop="onFaenaDrop(event, 'En curso')">
+              <div class="kanban-column-header">
+                <div class="kanban-column-title-wrap">
+                  <span>🔵</span>
+                  <h4>En curso</h4>
+                </div>
+                <span class="col-count-pill">${enCurso.length}</span>
+              </div>
+              <div class="kanban-cards-list" id="cards-${clave}-En-curso">
+                ${tarjetasEnCursoHtml}
+              </div>
+            </div>
+
+            <!-- Columna 3: Finalizadas -->
+            <div class="kanban-column col-finalizadas" id="col-${clave}-Finalizadas"
+                 ondragover="onFaenaDragOver(event)" ondragleave="onFaenaDragLeave(event)" ondrop="onFaenaDrop(event, 'Finalizadas')">
+              <div class="kanban-column-header">
+                <div class="kanban-column-title-wrap">
+                  <span>🟢</span>
+                  <h4>Finalizadas</h4>
+                </div>
+                <span class="col-count-pill">${finalizadas.length}</span>
+              </div>
+              <div class="kanban-cards-list" id="cards-${clave}-Finalizadas">
+                ${tarjetasFinalizadasHtml}
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    `;
+  });
+
+  container.innerHTML = htmlGrupos;
 }
 
 window.filtrarFeedPorHuerto = function(huertoId) {
   const usuario = document.getElementById('filtro-usuario-feed')?.value || 'todos';
-  renderizarFeed(huertoId, usuario);
+  const periodo = document.getElementById('filtro-periodo-feed')?.value || 'todos';
+  renderizarFeed(huertoId, usuario, periodo);
 };
 
 window.filtrarFeedPorUsuario = function(usuarioId) {
   const huerto = document.getElementById('filtro-huerto-feed')?.value || 'todos';
-  renderizarFeed(huerto, usuarioId);
+  const periodo = document.getElementById('filtro-periodo-feed')?.value || 'todos';
+  renderizarFeed(huerto, usuarioId, periodo);
+};
+
+window.filtrarFeedPorPeriodo = function(periodo) {
+  const huerto = document.getElementById('filtro-huerto-feed')?.value || 'todos';
+  const usuario = document.getElementById('filtro-usuario-feed')?.value || 'todos';
+  renderizarFeed(huerto, usuario, periodo);
 };
 
 // 2. Renderizar Catálogo de Parcelas (Baseline)
@@ -368,6 +706,33 @@ function renderizarSelectoresHuertos() {
       <option value="todos">Todos los operarios</option>
       ${USUARIOS.map(u => `<option value="${u.nombre}">${u.nombre}</option>`).join('')}
     `;
+  }
+
+  const selFeedPeriodo = document.getElementById('filtro-periodo-feed');
+  if (selFeedPeriodo) {
+    const periodosMap = new Map();
+    estado.faenas.forEach(f => {
+      if (f.fecha && f.fecha.length >= 7) {
+        const clave = f.fecha.slice(0, 7);
+        periodosMap.set(clave, (periodosMap.get(clave) || 0) + 1);
+      }
+    });
+
+    const periodosOrdenados = Array.from(periodosMap.keys()).sort().reverse();
+    const valorSeleccionado = selFeedPeriodo.value || 'todos';
+
+    selFeedPeriodo.innerHTML = `
+      <option value="todos">📅 Todos los periodos (${estado.faenas.length})</option>
+      ${periodosOrdenados.map(p => {
+        const info = obtenerInfoMesAno(`${p}-01`);
+        const total = periodosMap.get(p);
+        return `<option value="${p}">${info.etiqueta} (${total})</option>`;
+      }).join('')}
+    `;
+
+    if (periodosMap.has(valorSeleccionado) || valorSeleccionado === 'todos') {
+      selFeedPeriodo.value = valorSeleccionado;
+    }
   }
 }
 
@@ -486,6 +851,10 @@ window.guardarNuevaFaena = function(e) {
   const radioHierba = document.querySelector('input[name="hierba"]:checked');
   const hierba = radioHierba ? radioHierba.value : 'Limpio';
 
+  // Radio estado (DevOps / Kanban)
+  const radioEstado = document.querySelector('input[name="faena-estado"]:checked');
+  const estadoSeleccionado = radioEstado ? radioEstado.value : 'Finalizadas';
+
   const ahora = new Date();
   const hora = `${String(ahora.getHours()).padStart(2, '0')}:${String(ahora.getMinutes()).padStart(2, '0')}`;
 
@@ -498,6 +867,7 @@ window.guardarNuevaFaena = function(e) {
     parcelaId: huertoId,
     parcelaNombre: huerto ? huerto.nombre : 'Huerto',
     tipoFaena: tipoFaenaSeleccionada,
+    estado: normalizarEstado(estadoSeleccionado),
     quimicoProducto: producto,
     quimicoDosis: dosis,
     plagas: plagas,
@@ -510,10 +880,12 @@ window.guardarNuevaFaena = function(e) {
   guardarDatos();
   renderizarTodo();
 
-  mostrarToast(`¡Faena registrada con éxito en ${nuevaFaena.parcelaNombre}!`);
+  mostrarToast(`¡Faena registrada con éxito en ${nuevaFaena.parcelaNombre}! [${nuevaFaena.estado}]`);
 
   // Limpiar formulario y volver al feed
   document.getElementById('form-faena').reset();
+  const radioDefault = document.querySelector('input[name="faena-estado"][value="Finalizadas"]');
+  if (radioDefault) radioDefault.checked = true;
   iniciarFormularioFaena();
 
   // Cambiar a pestaña feed
@@ -631,6 +1003,9 @@ window.importarDatos = function(event) {
         estado.parcelas = data.parcelas;
       }
       if (data.faenas && Array.isArray(data.faenas)) {
+        data.faenas.forEach(f => {
+          f.estado = normalizarEstado(f.estado || 'Finalizadas');
+        });
         estado.faenas = data.faenas;
       }
       guardarDatos();

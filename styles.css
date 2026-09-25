@@ -233,7 +233,29 @@ body {
   color: var(--text-muted);
 }
 
-/* Feed List (Muro de Faenas) */
+/* Feed List / Tablero Kanban (Muro de Faenas) */
+.section-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.btn-toggle-all {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
+  padding: 0.25rem 0.65rem;
+  border-radius: var(--radius-full);
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.btn-toggle-all:hover {
+  border-color: var(--primary);
+  color: var(--text-main);
+}
+
 .filter-bar {
   display: flex;
   gap: 0.5rem;
@@ -252,24 +274,305 @@ body {
   min-width: 140px;
 }
 
-.feed-list {
+.feed-container-kanban {
   display: flex;
   flex-direction: column;
-  gap: 0.85rem;
+  gap: 1.25rem;
 }
 
-.feed-card {
-  background-color: var(--bg-card);
+/* Grupo de Mes / Año */
+.kanban-month-group {
+  background-color: var(--bg-surface);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
-  padding: 1rem 1.15rem;
+  overflow: hidden;
   box-shadow: var(--shadow-sm);
   transition: var(--transition);
 }
 
-.feed-card:hover {
+.kanban-month-group.collapsed .kanban-month-body {
+  display: none;
+}
+
+.kanban-month-group.collapsed .toggle-arrow {
+  transform: rotate(-90deg);
+}
+
+.kanban-month-header {
+  padding: 0.85rem 1.15rem;
+  background-color: rgba(255, 255, 255, 0.02);
+  border-bottom: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  user-select: none;
+  transition: var(--transition);
+}
+
+.kanban-month-header:hover {
+  background-color: rgba(255, 255, 255, 0.04);
+}
+
+.kanban-month-title {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.kanban-month-title h3 {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text-main);
+  letter-spacing: -0.01em;
+}
+
+.month-summary-badge {
+  font-size: 0.75rem;
+  padding: 0.2rem 0.55rem;
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-full);
+  color: var(--text-muted);
+}
+
+.toggle-arrow {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  transition: transform 0.2s ease;
+  display: inline-block;
+}
+
+.kanban-month-body {
+  padding: 0.85rem;
+}
+
+/* Mobile Quick Column Switcher */
+.mobile-col-switcher {
+  display: none;
+  gap: 0.4rem;
+  margin-bottom: 0.85rem;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.mobile-col-switcher::-webkit-scrollbar {
+  display: none;
+}
+
+.col-switch-btn {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
+  padding: 0.4rem 0.75rem;
+  border-radius: var(--radius-full);
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: var(--transition);
+  flex-shrink: 0;
+}
+
+.col-switch-btn.active {
+  background-color: var(--primary);
+  color: #052e16;
+  border-color: var(--primary-light);
+}
+
+/* Tablero Kanban: 3 columnas */
+.kanban-board {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.85rem;
+  align-items: start;
+}
+
+/* Columna Kanban */
+.kanban-column {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+  max-height: 72vh;
+  min-height: 220px;
+  overflow: hidden;
+  transition: border-color 0.2s ease;
+}
+
+.kanban-column.drag-over {
   border-color: var(--primary);
-  transform: translateY(-1px);
+  box-shadow: 0 0 12px var(--primary-glow);
+}
+
+.kanban-column-header {
+  padding: 0.75rem 0.9rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border-subtle);
+  background-color: var(--bg-card);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.kanban-column-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.col-pendientes .kanban-column-header {
+  border-top: 3px solid var(--warning);
+}
+
+.col-en-curso .kanban-column-header {
+  border-top: 3px solid #3b82f6;
+}
+
+.col-finalizadas .kanban-column-header {
+  border-top: 3px solid var(--primary);
+}
+
+.kanban-column-header h4 {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.col-count-pill {
+  font-size: 0.75rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--radius-full);
+  font-weight: 700;
+}
+
+.col-pendientes .col-count-pill {
+  background-color: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+}
+
+.col-en-curso .col-count-pill {
+  background-color: rgba(59, 130, 246, 0.15);
+  color: #60a5fa;
+}
+
+.col-finalizadas .col-count-pill {
+  background-color: rgba(34, 197, 94, 0.15);
+  color: var(--primary-light);
+}
+
+.kanban-cards-list {
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  overflow-y: auto;
+  flex: 1;
+  -webkit-overflow-scrolling: touch;
+}
+
+.kanban-empty-col {
+  text-align: center;
+  padding: 2rem 1rem;
+  color: var(--text-subtle);
+  font-size: 0.8rem;
+  border: 1px dashed var(--border-subtle);
+  border-radius: var(--radius-sm);
+  margin: 0.25rem;
+  background-color: rgba(0, 0, 0, 0.1);
+}
+
+/* Tarjeta de Faena */
+.feed-card {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 0.85rem;
+  box-shadow: var(--shadow-sm);
+  transition: var(--transition);
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.feed-card:hover {
+  border-color: var(--border-color);
+}
+
+.feed-card[draggable="true"] {
+  cursor: grab;
+}
+
+.feed-card[draggable="true"]:active {
+  cursor: grabbing;
+}
+
+/* Status Bar en cada Card (Cambio de estado con 1 clic desde móvil) */
+.card-status-bar {
+  margin-top: 0.45rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.status-bar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.7rem;
+  color: var(--text-subtle);
+}
+
+.status-btn-group {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.35rem;
+}
+
+.btn-status {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  padding: 0.45rem 0.2rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-align: center;
+  cursor: pointer;
+  transition: var(--transition);
+  white-space: nowrap;
+}
+
+.btn-status:hover {
+  border-color: var(--border-color);
+  color: var(--text-main);
+}
+
+.btn-status.active.pendientes {
+  background-color: rgba(245, 158, 11, 0.2);
+  border-color: var(--warning);
+  color: #fbbf24;
+  font-weight: 700;
+}
+
+.btn-status.active.en-curso {
+  background-color: rgba(59, 130, 246, 0.2);
+  border-color: #3b82f6;
+  color: #60a5fa;
+  font-weight: 700;
+}
+
+.btn-status.active.finalizadas {
+  background-color: rgba(34, 197, 94, 0.2);
+  border-color: var(--primary);
+  color: var(--primary-light);
+  font-weight: 700;
 }
 
 .feed-header {
@@ -821,8 +1124,72 @@ body {
   gap: 0.5rem;
 }
 
+/* Estilos para selección de estado de faena en formulario */
+.chip-pendientes input:checked + span {
+  background-color: rgba(245, 158, 11, 0.2);
+  border-color: var(--warning);
+  color: #fbbf24;
+}
+
+.chip-en-curso input:checked + span {
+  background-color: rgba(59, 130, 246, 0.2);
+  border-color: #3b82f6;
+  color: #60a5fa;
+}
+
+.chip-finalizadas input:checked + span {
+  background-color: rgba(34, 197, 94, 0.2);
+  border-color: var(--primary);
+  color: var(--primary-light);
+}
+
+/* Media Queries Responsivas */
+@media (max-width: 860px) {
+  .mobile-col-switcher {
+    display: flex;
+  }
+
+  .kanban-board {
+    display: flex;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    gap: 0.75rem;
+    padding-bottom: 0.5rem;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .kanban-column {
+    flex: 0 0 85%;
+    max-width: 85%;
+    scroll-snap-align: center;
+    max-height: 68vh;
+  }
+
+  .filter-bar .form-select-sm {
+    flex: 1 1 100%;
+  }
+}
+
 @media (max-width: 600px) {
   .form-row-2 {
     grid-template-columns: 1fr;
+  }
+  
+  .kanban-month-header {
+    padding: 0.75rem 0.9rem;
+  }
+
+  .kanban-month-title h3 {
+    font-size: 0.95rem;
+  }
+
+  .status-btn-group {
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 0.25rem;
+  }
+
+  .btn-status {
+    padding: 0.4rem 0.15rem;
+    font-size: 0.68rem;
   }
 }
