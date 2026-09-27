@@ -120,6 +120,37 @@ console.log('\n=== TEST 5: Integridad Criptográfica SHA-256 ===');
 
   console.log('✅ Sintaxis de app.js y sw.js validada sin errores.');
 
+  console.log('\n=== TEST 7: Bóveda Criptográfica AES-256-GCM con PBKDF2 ===');
+  const payloadOriginal = {
+    parcelas: [{ id: 'p-montanyeta', nombre: 'Montanyeta', arboles: 520 }],
+    faenas: [{ id: 'f-1', fecha: '2026-09-27', tipoFaena: 'Riego', usuario: 'Carlos' }]
+  };
+  const claveMaestra = 'CarlosHuertos2026!';
+  
+  // Cifrar datos
+  const paqueteCifrado = await HuertoSecurity.encryptData(payloadOriginal, claveMaestra);
+  assert(paqueteCifrado.ciphertext && paqueteCifrado.salt && paqueteCifrado.iv, 'El paquete debe contener ciphertext, salt e iv');
+  assert.strictEqual(paqueteCifrado.alg, 'AES-256-GCM');
+  assert.strictEqual(paqueteCifrado.iter, 100000);
+
+  // Descifrar con clave correcta
+  const payloadDescifrado = await HuertoSecurity.decryptData(paqueteCifrado, claveMaestra);
+  assert.deepStrictEqual(payloadDescifrado, payloadOriginal, 'El contenido descifrado debe ser idéntico al original');
+
+  // Descifrar con clave incorrecta (debe fallar)
+  let falloClaveIncorrecta = false;
+  try {
+    await HuertoSecurity.decryptData(paqueteCifrado, 'ClaveErronea123');
+  } catch (err) {
+    falloClaveIncorrecta = true;
+  }
+  assert(falloClaveIncorrecta, 'Debe fallar al intentar descifrar con clave incorrecta');
+  console.log('✅ Bóveda AES-256-GCM y derivación PBKDF2 validadas con éxito.');
+
+  console.log('\n=== TEST 8: Control de Versión Hardened ===');
+  assert(HuertoSecurity.VERSION.includes('cryptovault'), 'Debe reflejar versión cryptovault');
+  console.log(`✅ Versión verificada: ${HuertoSecurity.VERSION}`);
+
   console.log('\n=============================================');
   console.log('🎉 TODOS LOS TESTS DE CIBERSEGURIDAD PASARON.');
   console.log('=============================================');

@@ -9,9 +9,10 @@
  * 3. Verificación Criptográfica de Integridad de Datos (SHA-256 Checksum)
  * 4. Validación de Esquemas y Whitelisting de Entradas (Anti-Tampering)
  * 5. Prevención de Inyección de Fórmulas en Exportaciones (Anti-CSV Injection)
- * 6. Copias de Seguridad Automáticas Previas a Modificaciones (Rollback Snapshots)
- * 7. Control de Sesión en Campo y Bloqueo por PIN Criptográfico Opcional
- * 8. Registro Seguro de Auditoría (Audit Trail) sin Fuga de Metadatos
+ * 6. Bóveda Criptográfica Local con Cifrado Militar AES-256-GCM y PBKDF2
+ * 7. Control de Sesión en Campo, Bloqueo por PIN y Protección Anti Fuerza Bruta
+ * 8. Detección Inteligente de Inactividad y Auto-bloqueo de Pantalla en Campo
+ * 9. Autorización Criptográfica Obligatoria para Extracción y Descarga de Datos
  * 
  * Cumplimiento: OWASP Top 10 Web & Client-Side Security Guidelines 2026.
  */
@@ -19,12 +20,15 @@
 (function (window) {
   'use strict';
 
-  // Configuración de constantes de seguridad
+  // Configuración de constantes de almacenamiento y seguridad
+  const VAULT_STORAGE_KEY = 'huertos_carlos_vault_v4';
   const HASH_STORAGE_KEY = 'huertos_carlos_integrity_hash_v3';
   const SNAPSHOT_ROLLBACK_KEY = 'huertos_carlos_snapshot_pre_action';
   const PIN_HASH_KEY = 'huertos_carlos_pin_auth_v3';
   const PIN_SALT_KEY = 'huertos_carlos_pin_salt_v3';
   const SESSION_LOCK_KEY = 'huertos_carlos_session_locked';
+  const FAILED_ATTEMPTS_KEY = 'huertos_carlos_failed_attempts';
+  const LOCKOUT_UNTIL_KEY = 'huertos_carlos_lockout_until';
 
   // Caracteres peligrosos para XSS
   const HTML_ESCAPES = {
@@ -40,6 +44,42 @@
 
   // Caracteres de inyección de fórmulas CSV / Excel
   const CSV_INJECTION_PREFIXES = ['=', '+', '-', '@', '\t', '\r'];
+
+  // Referencias criptográficas seguras universales (Navegador y Node.js)
+  const cryptoObj = (typeof window !== 'undefined' && window.crypto) 
+    ? window.crypto 
+    : (typeof crypto !== 'undefined') ? crypto : null;
+  const subtle = cryptoObj && cryptoObj.subtle ? cryptoObj.subtle : null;
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+
+  /**
+   * Conversiones auxiliares Base64 seguras
+   */
+  function uint8ToBase64(arr) {
+    if (typeof Buffer !== 'undefined') {
+      return Buffer.from(arr).toString('base64');
+    }
+    let binary = '';
+    const len = arr.byteLength;
+    for (let i = 0; i < len; i++) {
+      binary += String.fromCharCode(arr[i]);
+    }
+    return btoa(binary);
+  }
+
+  function base64ToUint8(b64) {
+    if (typeof Buffer !== 'undefined') {
+      return new Uint8Array(Buffer.from(b64, 'base64'));
+    }
+    const binary = atob(b64);
+    const len = binary.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes;
+  }
 
   /**
    * 1. ANTI-XSS & SANITIZACIÓN HTML
@@ -132,18 +172,16 @@
    * Calcula el resumen criptográfico SHA-256 de una cadena de datos.
    */
   async function computeSha256(text) {
-    if (typeof window !== 'undefined' && window.crypto && window.crypto.subtle) {
+    if (subtle) {
       try {
-        const encoder = new TextEncoder();
         const data = encoder.encode(text);
-        const hashBuffer = await window.crypto.subtle.digest('SHA-256', data);
+        const hashBuffer = await subtle.digest('SHA-256', data);
         const hashArray = Array.from(new Uint8Array(hashBuffer));
         return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
       } catch (err) {
         // Fallback síncrono si Web Crypto falla
       }
     }
-    // Fallback: Algoritmo FNV-1a extendido de 64 bits si Web Crypto no estuviese disponible
     return fallbackHash(text);
   }
 
@@ -161,7 +199,138 @@
   }
 
   /**
-   * Guarda los datos en localStorage adjuntando su hash criptográfico de integridad.
+   * 4. BÓVEDA CRIPTOGRÁFICA MILITAR: CIFRADO Y DESCIFRADO AES-256-GCM + PBKDF2
+   * Deriva clave criptográfica con PBKDF2 (100.000 iteraciones SHA-256 + salt de 128 bits)
+   * y cifra con AES-256-GCM con Vector de Inicialización (IV) único de 96 bits.
+   */
+  async function deriveKey(password, saltUint8, iterations = 100000) {
+    if (!subtle) throw new Error('WebCrypto no disponible en este entorno');
+    const baseKey = await subtle.importKey(
+      'raw',
+      encoder.encode(String(password)),
+      'PBKDF2',
+      false,
+      ['deriveKey']
+    );
+    return subtle.deriveKey(
+      {
+        name: 'PBKDF2',
+        salt: saltUint8,
+        iterations: iterations,
+        hash: 'SHA-256'
+      },
+      baseKey,
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['encrypt', 'decrypt']
+    );
+  }
+
+  async function encryptData(dataObj, password) {
+    if (!subtle) throw new Error('Criptografía WebCrypto no disponible');
+    if (!password) throw new Error('Se requiere contraseña o PIN para cifrar');
+    const salt = cryptoObj.getRandomValues(new Uint8Array(16));
+    const iv = cryptoObj.getRandomValues(new Uint8Array(12));
+    const key = await deriveKey(password, salt, 100000);
+    const serialized = JSON.stringify(dataObj);
+    const encoded = encoder.encode(serialized);
+    const cipherBuffer = await subtle.encrypt(
+      { name: 'AES-GCM', iv },
+      key,
+      encoded
+    );
+    return {
+      alg: 'AES-256-GCM',
+      kdf: 'PBKDF2-SHA256',
+      iter: 100000,
+      salt: uint8ToBase64(salt),
+      iv: uint8ToBase64(iv),
+      ciphertext: uint8ToBase64(new Uint8Array(cipherBuffer)),
+      created: new Date().toISOString()
+    };
+  }
+
+  async function decryptData(packageObj, password) {
+    if (!subtle) throw new Error('Criptografía WebCrypto no disponible');
+    if (!packageObj || !packageObj.ciphertext || !packageObj.salt || !packageObj.iv) {
+      throw new Error('Estructura de paquete cifrado inválida');
+    }
+    const salt = base64ToUint8(packageObj.salt);
+    const iv = base64ToUint8(packageObj.iv);
+    const ciphertext = base64ToUint8(packageObj.ciphertext);
+    const iterations = packageObj.iter || 100000;
+    const key = await deriveKey(password, salt, iterations);
+    try {
+      const decryptedBuffer = await subtle.decrypt(
+        { name: 'AES-GCM', iv },
+        key,
+        ciphertext
+      );
+      const decoded = decoder.decode(decryptedBuffer);
+      return safeJsonParse(decoded);
+    } catch (err) {
+      throw new Error('PIN o Contraseña incorrecta. No se puede descifrar la información.');
+    }
+  }
+
+  /**
+   * Guarda los datos en la bóveda local cifrada con AES-256-GCM.
+   */
+  async function guardarBovedaCifrada(payload, password) {
+    try {
+      const paqueteCifrado = await encryptData(payload, password);
+      const raw = JSON.stringify(paqueteCifrado);
+      const hash = await computeSha256(raw);
+      localStorage.setItem(VAULT_STORAGE_KEY, raw);
+      localStorage.setItem(HASH_STORAGE_KEY, hash);
+      // Purgar de inmediato copias en texto plano para asegurar "Zero Plaintext at Rest"
+      localStorage.removeItem('huertos_carlos_db_v3');
+      localStorage.removeItem('huertos_carlos_db_v2');
+      return { success: true, hash };
+    } catch (e) {
+      if (e.name === 'QuotaExceededError' || e.code === 22) {
+        console.error('[Ciberseguridad] Cuota de almacenamiento local excedida');
+        return { success: false, error: 'QUOTA_EXCEEDED' };
+      }
+      console.error('[Ciberseguridad] Error guardando bóveda cifrada:', e);
+      return { success: false, error: e.message };
+    }
+  }
+
+  /**
+   * Carga y descifra los datos de la bóveda local usando la clave/PIN proporcionado.
+   */
+  async function cargarBovedaCifrada(password) {
+    const raw = localStorage.getItem(VAULT_STORAGE_KEY);
+    if (!raw) {
+      return { status: 'EMPTY', data: null };
+    }
+
+    const storedHash = localStorage.getItem(HASH_STORAGE_KEY);
+    if (storedHash) {
+      const currentHash = await computeSha256(raw);
+      if (currentHash !== storedHash) {
+        console.warn('[Ciberseguridad] ¡Alerta de manipulación de bóveda! El hash no coincide.');
+        return { status: 'TAMPERED', data: null };
+      }
+    }
+
+    try {
+      const paquete = safeJsonParse(raw);
+      if (!paquete) return { status: 'CORRUPTED', data: null };
+      const data = await decryptData(paquete, password);
+      return { status: 'VERIFIED', data: data, hash: storedHash };
+    } catch (e) {
+      return { status: 'WRONG_KEY', error: e.message };
+    }
+  }
+
+  function tieneBovedaCifrada() {
+    return Boolean(localStorage.getItem(VAULT_STORAGE_KEY));
+  }
+
+  /**
+   * Métodos heredados de almacenamiento con integridad (para migración progresiva)
    */
   async function guardarConIntegridad(storageKey, payload) {
     try {
@@ -172,17 +341,12 @@
       return { success: true, hash };
     } catch (e) {
       if (e.name === 'QuotaExceededError' || e.code === 22) {
-        console.error('[Ciberseguridad] Cuota de almacenamiento local excedida');
         return { success: false, error: 'QUOTA_EXCEEDED' };
       }
-      console.error('[Ciberseguridad] Error guardando con integridad:', e);
       return { success: false, error: e.message };
     }
   }
 
-  /**
-   * Carga los datos de localStorage y verifica su integridad contra el hash almacenado.
-   */
   async function cargarConIntegridad(storageKey) {
     const rawData = localStorage.getItem(storageKey);
     if (!rawData) {
@@ -199,7 +363,6 @@
     if (storedHash) {
       const currentHash = await computeSha256(rawData);
       if (currentHash !== storedHash) {
-        console.warn('[Ciberseguridad] ¡Alerta de manipulación de datos! El hash no coincide con la firma guardada.');
         return { status: 'TAMPERED', data: parsedData, calculatedHash: currentHash, storedHash };
       }
     }
@@ -208,21 +371,21 @@
   }
 
   /**
-   * 4. COPIA DE SEGURIDAD AUTOMÁTICA PREVIA (ROLLBACK SNAPSHOT)
-   * Guarda un estado seguro antes de importar o restablecer datos.
+   * 5. COPIA DE SEGURIDAD PREVIA (ROLLBACK SNAPSHOT)
    */
   function crearSnapshotSeguridad(storageKey) {
     try {
-      const actual = localStorage.getItem(storageKey);
+      const actual = localStorage.getItem(storageKey) || localStorage.getItem(VAULT_STORAGE_KEY);
       if (actual) {
         localStorage.setItem(SNAPSHOT_ROLLBACK_KEY, JSON.stringify({
           timestamp: new Date().toISOString(),
-          data: actual
+          data: actual,
+          isVault: Boolean(localStorage.getItem(VAULT_STORAGE_KEY))
         }));
         return true;
       }
     } catch (e) {
-      console.warn('[Ciberseguridad] No se pudo crear snapshot de seguridad:', e);
+      console.warn('[Ciberseguridad] No se pudo crear snapshot:', e);
     }
     return false;
   }
@@ -233,7 +396,11 @@
       if (!snapRaw) return false;
       const snap = safeJsonParse(snapRaw);
       if (snap && snap.data) {
-        localStorage.setItem(storageKey, snap.data);
+        if (snap.isVault) {
+          localStorage.setItem(VAULT_STORAGE_KEY, snap.data);
+        } else {
+          localStorage.setItem(storageKey, snap.data);
+        }
         return true;
       }
     } catch (e) {
@@ -243,23 +410,19 @@
   }
 
   /**
-   * 5. PREVENCIÓN DE INYECCIÓN DE FÓRMULAS CSV / EXCEL
-   * Si una celda comienza por =, +, -, @, o caracteres de control, se neutraliza con comilla simple.
+   * 6. PREVENCIÓN DE INYECCIÓN DE FÓRMULAS CSV / EXCEL
    */
   function sanitizeCsvCell(val) {
     if (val === null || val === undefined) return '""';
     let str = String(val).trim();
-    // Neutralizar caracteres que activan fórmulas en Excel o LibreOffice
     if (CSV_INJECTION_PREFIXES.some(prefix => str.startsWith(prefix))) {
       str = "'" + str;
     }
-    // Escapar comillas dobles y envolver
     return `"${str.replace(/"/g, '""')}"`;
   }
 
   /**
-   * 6. VALIDACIÓN Y SANEAMIENTO DE ESQUEMA DE FAENA
-   * Whitelist estricto y límites de longitud para evitar ataques de DoS o inyecciones.
+   * 7. VALIDACIÓN Y SANEAMIENTO DE ESQUEMA DE FAENA & PARCELA
    */
   const ESTADOS_VALIDOS = ['Pendientes', 'En curso', 'Finalizadas'];
   const HIERBAS_VALIDAS = ['Limpio', 'Poca hierba', 'Mucha hierba'];
@@ -269,16 +432,12 @@
       throw new Error('La faena proporcionada no tiene una estructura válida');
     }
 
-    const huertoIds = huertosValidos.map(h => h.id);
     const parcelaId = String(input.parcelaId || '').trim();
-    
-    // Validación de fecha YYYY-MM-DD
     const fecha = String(input.fecha || '').trim();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) {
       throw new Error('Formato de fecha inválido. Se requiere YYYY-MM-DD');
     }
 
-    // Normalizar estado
     let estado = 'Finalizadas';
     if (input.estado) {
       const estNorm = String(input.estado).trim();
@@ -291,25 +450,20 @@
       }
     }
 
-    // Normalizar hierba
     let hierba = 'Limpio';
     if (input.hierba && HIERBAS_VALIDAS.includes(input.hierba)) {
       hierba = input.hierba;
     }
 
-    // Sanitizar plagas (lista blanca / strings limpios)
     let plagas = [];
     if (Array.isArray(input.plagas)) {
       plagas = input.plagas
-        .slice(0, 10) // Límite de 10 plagas
+        .slice(0, 10)
         .map(p => stripHtmlAndControl(p).substring(0, 40))
         .filter(p => p.length > 0);
     }
 
-    // Generar o limpiar ID
     const id = input.id ? sanitizeId(input.id) : ('f-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7));
-
-    // Audit Trail inmutable
     const ahoraIso = new Date().toISOString();
 
     return {
@@ -328,10 +482,9 @@
       plagasNegadas: Array.isArray(input.plagasNegadas) ? input.plagasNegadas.slice(0, 10).map(p => stripHtmlAndControl(p).substring(0, 40)) : [],
       esTratamiento: Boolean(input.esTratamiento),
       hierba: hierba,
-      notas: stripHtmlAndControl(input.notas || '').substring(0, 2000), // Max 2000 chars
-      // Metadatos de seguridad y trazabilidad
+      notas: stripHtmlAndControl(input.notas || '').substring(0, 2000),
       _seguridad: {
-        version: '3.0',
+        version: '4.0',
         auditCreadoEn: input._seguridad?.auditCreadoEn || ahoraIso,
         auditModificadoEn: ahoraIso,
         integridadLocal: true
@@ -363,17 +516,44 @@
   }
 
   /**
-   * 7. CONTROL DE PRIVACIDAD Y BLOQUEO POR PIN (OPCIONAL)
-   * Permite proteger la app en campo contra miradas no deseadas.
+   * 8. CONTROL DE PIN, PROTECCIÓN CONTRA FUERZA BRUTA Y RATE-LIMITING
    */
-  async function configurarPinSeguridad(pinCuatroDigitos) {
-    if (!pinCuatroDigitos || !/^\d{4}$/.test(pinCuatroDigitos)) {
-      throw new Error('El PIN debe componerse exactamente de 4 dígitos numéricos');
+  function verificarEstadoBloqueoIntentos() {
+    const lockoutUntil = parseInt(localStorage.getItem(LOCKOUT_UNTIL_KEY) || '0', 10);
+    const now = Date.now();
+    if (lockoutUntil > now) {
+      const waitSeconds = Math.ceil((lockoutUntil - now) / 1000);
+      return { bloqueado: true, segundosRestantes: waitSeconds };
     }
-    const salt = Math.random().toString(36).substring(2, 12);
-    const pinHash = await computeSha256(salt + pinCuatroDigitos);
+    return { bloqueado: false, segundosRestantes: 0 };
+  }
+
+  function registrarFalloAutenticacion() {
+    let intentos = parseInt(localStorage.getItem(FAILED_ATTEMPTS_KEY) || '0', 10) + 1;
+    localStorage.setItem(FAILED_ATTEMPTS_KEY, String(intentos));
+    if (intentos >= 5) {
+      localStorage.setItem(LOCKOUT_UNTIL_KEY, String(Date.now() + 60000)); // 60s
+    } else if (intentos >= 3) {
+      localStorage.setItem(LOCKOUT_UNTIL_KEY, String(Date.now() + 30000)); // 30s
+    }
+    return intentos;
+  }
+
+  function reiniciarFallosAutenticacion() {
+    localStorage.removeItem(FAILED_ATTEMPTS_KEY);
+    localStorage.removeItem(LOCKOUT_UNTIL_KEY);
+  }
+
+  async function configurarPinSeguridad(pin) {
+    const pinLimpio = String(pin || '').trim();
+    if (pinLimpio.length < 4) {
+      throw new Error('El PIN o clave debe tener al menos 4 caracteres');
+    }
+    const salt = Math.random().toString(36).substring(2, 12) + Math.random().toString(36).substring(2, 12);
+    const pinHash = await computeSha256(salt + pinLimpio);
     localStorage.setItem(PIN_SALT_KEY, salt);
     localStorage.setItem(PIN_HASH_KEY, pinHash);
+    reiniciarFallosAutenticacion();
     return true;
   }
 
@@ -381,6 +561,7 @@
     localStorage.removeItem(PIN_SALT_KEY);
     localStorage.removeItem(PIN_HASH_KEY);
     localStorage.removeItem(SESSION_LOCK_KEY);
+    reiniciarFallosAutenticacion();
   }
 
   function tienePinActivo() {
@@ -388,11 +569,38 @@
   }
 
   async function verificarPin(pinIntento) {
-    if (!tienePinActivo()) return true;
+    if (!tienePinActivo()) return { success: true };
+
+    const statusBloqueo = verificarEstadoBloqueoIntentos();
+    if (statusBloqueo.bloqueado) {
+      return {
+        success: false,
+        bloqueado: true,
+        segundosRestantes: statusBloqueo.segundosRestantes,
+        mensaje: `Demasiados intentos fallidos. Espera ${statusBloqueo.segundosRestantes} segundos por seguridad.`
+      };
+    }
+
     const salt = localStorage.getItem(PIN_SALT_KEY);
     const storedHash = localStorage.getItem(PIN_HASH_KEY);
     const intentoHash = await computeSha256(salt + String(pinIntento).trim());
-    return intentoHash === storedHash;
+
+    if (intentoHash === storedHash) {
+      reiniciarFallosAutenticacion();
+      return { success: true };
+    } else {
+      const totalFallos = registrarFalloAutenticacion();
+      const statusActual = verificarEstadoBloqueoIntentos();
+      return {
+        success: false,
+        bloqueado: statusActual.bloqueado,
+        segundosRestantes: statusActual.segundosRestantes,
+        totalFallos: totalFallos,
+        mensaje: statusActual.bloqueado
+          ? `PIN incorrecto. Bóveda bloqueada durante ${statusActual.segundosRestantes} segundos por seguridad.`
+          : `PIN incorrecto. Intento ${totalFallos} (máx 3 antes de bloqueo).`
+      };
+    }
   }
 
   function bloquearSesion() {
@@ -409,6 +617,50 @@
 
   function estaSesionBloqueada() {
     return tienePinActivo() && localStorage.getItem(SESSION_LOCK_KEY) === 'true';
+  }
+
+  /**
+   * 9. DETECCIÓN DE INACTIVIDAD Y AUTO-BLOQUEO INTELIGENTE
+   */
+  let inactividadTimer = null;
+  let visibilidadTimer = null;
+
+  function iniciarDetectorInactividad(minutosInactividad = 10, onLockCallback) {
+    if (typeof window === 'undefined' || !window.document) return;
+
+    const resetTimer = () => {
+      if (inactividadTimer) clearTimeout(inactividadTimer);
+      if (tienePinActivo() && !estaSesionBloqueada()) {
+        inactividadTimer = setTimeout(() => {
+          bloquearSesion();
+          if (typeof onLockCallback === 'function') {
+            onLockCallback('inactividad');
+          }
+        }, minutosInactividad * 60 * 1000);
+      }
+    };
+
+    const eventos = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll'];
+    eventos.forEach(evt => window.addEventListener(evt, resetTimer, { passive: true }));
+    resetTimer();
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        if (tienePinActivo() && !estaSesionBloqueada()) {
+          visibilidadTimer = setTimeout(() => {
+            bloquearSesion();
+            if (typeof onLockCallback === 'function') {
+              onLockCallback('pantalla_oculta');
+            }
+          }, 5 * 60 * 1000); // 5 minutos oculta
+        }
+      } else {
+        if (visibilidadTimer) {
+          clearTimeout(visibilidadTimer);
+          visibilidadTimer = null;
+        }
+      }
+    });
   }
 
   // Exportar API protegida y congelada
@@ -434,7 +686,16 @@
     bloquearSesion,
     desbloquearSesion,
     estaSesionBloqueada,
-    VERSION: '3.0.0-security-hardened'
+    // Primitivas de bóveda militar AES-256-GCM
+    encryptData,
+    decryptData,
+    guardarBovedaCifrada,
+    cargarBovedaCifrada,
+    tieneBovedaCifrada,
+    verificarEstadoBloqueoIntentos,
+    reiniciarFallosAutenticacion,
+    iniciarDetectorInactividad,
+    VERSION: '4.0.0-cryptovault-hardened'
   });
 
   // Publicar de manera segura en el entorno global

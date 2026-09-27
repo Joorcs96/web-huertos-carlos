@@ -10,8 +10,8 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   
-  <!-- Directivas de Ciberseguridad y Prevención de Fugas de Datos (CSP) -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' http://localhost:* http://127.0.0.1:* http://192.168.* http://10.* https://*.github.io; font-src 'self'; object-src 'none'; media-src 'none'; frame-src 'none'; child-src 'none'; form-action 'self'; base-uri 'self';">
+  <!-- Directivas de Ciberseguridad y Prevención de Fugas de Datos (CSP Estricto) -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self'; object-src 'none'; media-src 'none'; frame-src 'none'; child-src 'none'; form-action 'self'; base-uri 'self';">
   <meta http-equiv="X-Content-Type-Options" content="nosniff">
   <meta http-equiv="X-Frame-Options" content="DENY">
   <meta name="referrer" content="strict-origin-when-cross-origin">
@@ -22,20 +22,73 @@
 </head>
 <body>
 
-  <!-- Modal / Pantalla de Acceso Rápido de Usuario -->
+  <!-- Modal / Pantalla de Acceso Rápido y Bóveda Criptográfica -->
   <div id="auth-modal" class="auth-modal hidden">
     <div class="auth-card">
-      <div class="auth-header">
-        <div class="auth-logo">🚜</div>
-        <h2>Huertos Carlos</h2>
-        <p>Selecciona tu perfil para acceder al cuaderno de campo</p>
+      
+      <!-- Vista 1: Desbloqueo por PIN de Bóveda -->
+      <div id="vault-unlock-view">
+        <div class="auth-header">
+          <div class="auth-logo">🔒</div>
+          <h2>Bóveda Agrícola Privada</h2>
+          <p>Introduce tu PIN o Contraseña Maestra para descifrar el cuaderno de campo</p>
+        </div>
+        <form id="vault-unlock-form" onsubmit="procesarDesbloqueoPin(event)">
+          <div class="form-group" style="text-align: left; margin-bottom: 0.85rem;">
+            <label class="form-label" for="auth-pin-input">PIN / Clave de Acceso</label>
+            <input type="password" id="auth-pin-input" class="form-input" placeholder="Introduce el PIN" inputmode="numeric" autocomplete="current-password" required>
+          </div>
+          <div id="auth-pin-error" class="auth-error-msg hidden"></div>
+          <button type="submit" id="btn-submit-unlock" class="btn-submit-faena" style="width: 100%;">
+            🔓 Desbloquear Cuaderno
+          </button>
+        </form>
+        <div class="auth-footer" style="margin-top: 1.25rem;">
+          <p class="text-subtle">Cifrado de grado militar AES-256-GCM + PBKDF2</p>
+        </div>
       </div>
-      <div id="usuarios-selector" class="users-grid">
-        <!-- Renderizado dinámico de los 3 usuarios -->
+
+      <!-- Vista 2: Configuración Inicial de Seguridad (solo si no hay PIN activo) -->
+      <div id="vault-setup-view" class="hidden">
+        <div class="auth-header">
+          <div class="auth-logo">🛡️</div>
+          <h2>Activar Bóveda Segura</h2>
+          <p>Define un PIN o Clave Maestra (mínimo 4 dígitos/caracteres) para blindar y cifrar las 30 parcelas y faenas:</p>
+        </div>
+        <form id="vault-setup-form" onsubmit="procesarCreacionPin(event)">
+          <div class="form-group" style="text-align: left; margin-bottom: 0.75rem;">
+            <label class="form-label" for="setup-pin-input">Nuevo PIN / Clave Maestra *</label>
+            <input type="password" id="setup-pin-input" class="form-input" placeholder="Mínimo 4 dígitos" required>
+          </div>
+          <div class="form-group" style="text-align: left; margin-bottom: 1rem;">
+            <label class="form-label" for="setup-pin-confirm">Confirmar PIN *</label>
+            <input type="password" id="setup-pin-confirm" class="form-input" placeholder="Repite el PIN" required>
+          </div>
+          <div id="setup-pin-error" class="auth-error-msg hidden"></div>
+          <button type="submit" class="btn-submit-faena" style="width: 100%;">
+            🔐 Activar Cifrado y Guardar
+          </button>
+        </form>
+        <div class="auth-footer" style="margin-top: 1.25rem;">
+          <p class="text-subtle">Nadie sin esta clave podrá leer ni extraer los datos</p>
+        </div>
       </div>
-      <div class="auth-footer">
-        <p class="text-subtle">Acceso privado y optimizado para móvil</p>
+
+      <!-- Vista 3: Selector de Operario (una vez descifrado) -->
+      <div id="vault-users-view" class="hidden">
+        <div class="auth-header">
+          <div class="auth-logo">🚜</div>
+          <h2>Huertos Carlos</h2>
+          <p>Selecciona tu perfil de trabajo:</p>
+        </div>
+        <div id="usuarios-selector" class="users-grid">
+          <!-- Renderizado dinámico de los usuarios -->
+        </div>
+        <div class="auth-footer">
+          <p class="text-subtle">Sesión protegida y verificada con SHA-256</p>
+        </div>
       </div>
+
     </div>
   </div>
 
@@ -54,8 +107,11 @@
         <button class="btn-new-task" onclick="abrirNuevaFaena()" title="Añadir parte de faena">
           <span>+ Nueva Faena</span>
         </button>
-        <button class="btn-user-switch" onclick="cambiarUsuario()" title="Cambiar de usuario">
+        <button class="btn-user-switch" onclick="cambiarUsuario()" title="Cambiar de operario">
           <span id="user-avatar-btn">👤</span>
+        </button>
+        <button class="btn-user-switch btn-lock-header" onclick="bloquearCuadernoManual('manual')" title="Bloquear cuaderno (Cierre de seguridad)">
+          <span>🔒</span>
         </button>
       </div>
     </div>
@@ -342,21 +398,65 @@
         </div>
       </div>
 
-      <!-- Importador / Exportador de datos y Copia de Seguridad -->
+      <!-- Bóveda Criptográfica y Estado de Seguridad -->
+      <div class="card" style="margin-top:1.5rem; border: 1px solid rgba(34, 197, 94, 0.4);">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem; margin-bottom:0.75rem;">
+          <h3 style="margin:0;">
+            <span>🛡️</span>
+            <span>Bóveda Criptográfica & Privacidad</span>
+          </h3>
+          <span class="badge-count" style="background:rgba(34, 197, 94, 0.15); color:var(--primary-light); border:1px solid rgba(34, 197, 94, 0.3);">
+            AES-256-GCM
+          </span>
+        </div>
+        <p class="text-subtle" style="margin-bottom:1rem;">
+          Todos los datos de huertos, propietarios, partes y químicos están cifrados en reposo. Nadie ajeno puede extraer la información sin el PIN maestro.
+        </p>
+
+        <div class="boveda-stats-grid">
+          <div class="boveda-stat-box">
+            <div class="boveda-stat-title">Estado de Cifrado</div>
+            <div class="boveda-stat-val" id="vault-status-badge">🔐 AES-256 Activo</div>
+          </div>
+          <div class="boveda-stat-box">
+            <div class="boveda-stat-title">Control de Acceso</div>
+            <div class="boveda-stat-val" id="pin-status-badge">PIN Protegido</div>
+          </div>
+          <div class="boveda-stat-box">
+            <div class="boveda-stat-title">Auto-bloqueo en Campo</div>
+            <div class="boveda-stat-val">⏱️ 10 min Inactividad</div>
+          </div>
+        </div>
+
+        <div style="display:flex; gap:0.6rem; flex-wrap:wrap; margin-top:1rem;">
+          <button class="btn-secondary" style="border-color:#ef4444; color:#f87171;" onclick="bloquearCuadernoManual('manual')">
+            🔒 Bloquear Cuaderno Ahora
+          </button>
+          <button class="btn-secondary" id="btn-gestionar-pin" onclick="gestionarPinSeguridad()">
+            🔑 Cambiar PIN de Acceso
+          </button>
+          <button class="btn-secondary" onclick="verificarIntegridadManual()">
+            🛡️ Verificar Integridad SHA-256
+          </button>
+        </div>
+      </div>
+
+      <!-- Exportación e Importación con Autorización PIN -->
       <div class="card" style="margin-top:1.5rem;">
         <h3>
           <span>📂</span>
-          <span>Copia de Seguridad & Datos Excel</span>
+          <span>Copias de Seguridad & Exportación Segura</span>
         </h3>
         <p class="text-subtle" style="margin-bottom:1rem;">
-          Puedes exportar todas las faenas y huertos a archivo JSON o CSV o sincronizar con el equipo.
+          Por seguridad, la descarga o restauración de datos sensibles requiere confirmación de tu PIN.
         </p>
         <div style="display:flex; gap:0.75rem; flex-wrap:wrap;">
-          <button class="btn-secondary" onclick="exportarDatos()">Descargar Copia (JSON)</button>
-          <button class="btn-secondary" onclick="exportarDatosSegurosCsv()">Exportar CSV</button>
-          <button class="btn-secondary" onclick="document.getElementById('import-file').click()">Cargar Datos Excel / JSON</button>
-          <button class="btn-secondary" style="border-color:var(--primary); color:var(--primary-light);" onclick="restablecerDatosExcel()">🔄 Restaurar Datos del Excel (30 Huertos)</button>
-          <input type="file" id="import-file" style="display:none;" onchange="importarDatos(event)" accept=".json,.csv">
+          <button class="btn-secondary" onclick="exportarDatosSeguros()">📥 Descargar JSON (Requiere PIN)</button>
+          <button class="btn-secondary" onclick="exportarDatosSegurosCsv()">📊 Exportar CSV (Requiere PIN)</button>
+          <button class="btn-secondary" style="border-color:var(--primary); color:var(--primary-light);" onclick="exportarCopiaCifradaBoveda()">🔐 Exportar Bóveda Cifrada (.hcenc)</button>
+          <button class="btn-secondary" onclick="document.getElementById('import-file').click()">📂 Cargar Copia / Bóveda</button>
+          <button class="btn-secondary" style="border-color:#eab308; color:#facc15;" onclick="restablecerDatosExcel()">🔄 Restaurar Excel de Carlos</button>
+          <input type="file" id="import-file" style="display:none;" onchange="importarDatos(event)" accept=".json,.csv,.hcenc">
         </div>
       </div>
     </div>

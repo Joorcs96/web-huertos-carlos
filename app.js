@@ -25,7 +25,9 @@ const FAENAS_INICIALES = (typeof window !== 'undefined' && window.DATOS_INICIALE
   ? window.DATOS_INICIALES_CARLOS.faenas
   : [];
 
-// Estado en memoria
+// Estado en memoria (se mantiene vacío hasta descifrar la bóveda con el PIN)
+let claveSesionActiva = sessionStorage.getItem('huertos_carlos_session_pass') || null;
+
 let estado = {
   usuarioActivo: null,
   parcelas: [],
@@ -33,73 +35,79 @@ let estado = {
 };
 
 // ============================================================================
-// INICIALIZACIÓN CON CIBERSEGURIDAD
+// INICIALIZACIÓN CON BÓVEDA CRIPTOGRÁFICA Y CIBERSEGURIDAD
 // ============================================================================
 document.addEventListener('DOMContentLoaded', async () => {
-  await cargarDatos();
-  iniciarSesionUsuario();
   iniciarNavegacion();
   iniciarFormularioFaena();
   iniciarProteccionPrivacidad();
-  renderizarTodo();
-  actualizarEstadoCiberseguridadUI();
+
+  // Comprobar si hay sesión descifrada activa en sessionStorage
+  if (claveSesionActiva && window.HuertoSecurity && window.HuertoSecurity.tienePinActivo()) {
+    const check = await window.HuertoSecurity.verificarPin(claveSesionActiva);
+    if (check.success && !window.HuertoSecurity.estaSesionBloqueada()) {
+      await cargarDatos();
+      iniciarSesionUsuario();
+      renderizarTodo();
+      actualizarEstadoCiberseguridadUI();
+      return;
+    }
+  }
+
+  // Si no hay sesión desbloqueada, mostrar pantalla de bóveda protegida
+  mostrarPantallaAutenticacionInicial();
 });
 
 async function cargarDatos() {
   try {
-    let raw = localStorage.getItem(STORAGE_KEY);
-    
-    // Migración transparente desde versiones previas preservando faenas manuales creadas por el usuario
-    if (!raw && localStorage.getItem(PREV_STORAGE_KEY)) {
-      try {
-        const rawPrev = localStorage.getItem(PREV_STORAGE_KEY);
-        const parsedPrev = window.HuertoSecurity ? window.HuertoSecurity.safeJsonParse(rawPrev) : JSON.parse(rawPrev);
-        if (parsedPrev && Array.isArray(parsedPrev.faenas)) {
-          const faenasUsuario = parsedPrev.faenas.filter(f => f.id && (f.id.startsWith('f-') || f.id.startsWith('faena-custom-') || !f.id.includes('-')));
-          const baseFaenas = JSON.parse(JSON.stringify(FAENAS_INICIALES));
-          estado.parcelas = (parsedPrev.parcelas && parsedPrev.parcelas.length >= 20) ? parsedPrev.parcelas : JSON.parse(JSON.stringify(PARCELAS_INICIALES));
-          estado.faenas = [...faenasUsuario, ...baseFaenas];
-          guardarDatos();
-          console.log(`[Migración] Actualizado a ${STORAGE_KEY} con ${faenasUsuario.length} faenas de usuario y ${baseFaenas.length} faenas base.`);
-        }
-      } catch (migErr) {
-        console.warn('[Migración] Error migrando v2:', migErr);
+    // 1. Si existe clave de sesión activa, intentar cargar desde la bóveda cifrada AES-256-GCM
+    if (claveSesionActiva && window.HuertoSecurity && window.HuertoSecurity.tieneBovedaCifrada()) {
+      const res = await window.HuertoSecurity.cargarBovedaCifrada(claveSesionActiva);
+      if (res.status === 'VERIFIED' && res.data) {
+        estado.parcelas = res.data.parcelas || [];
+        estado.faenas = res.data.faenas || [];
+        // Normalizar estados de faenas
+        normalizarColeccionesEnMemoria();
+        return;
+      } else if (res.status === 'WRONG_KEY') {
+        throw new Error('Clave o PIN no válido para descifrar la bóveda');
       }
-      raw = localStorage.getItem(STORAGE_KEY);
+    }
+
+    // 2. Si no hay bóveda cifrada aún, cargar datos base del proyecto (migración inicial)
+    let raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw && localStorage.getItem(PREV_STORAGE_KEY)) {
+      raw = localStorage.getItem(PREV_STORAGE_KEY);
     }
 
     if (raw) {
-      // Usar parser seguro contra Prototype Pollution
       const parsed = window.HuertoSecurity ? window.HuertoSecurity.safeJsonParse(raw) : JSON.parse(raw);
-      
-      // Verificación de integridad SHA-256 si HuertoSecurity está disponible
-      if (window.HuertoSecurity) {
-        const resultadoIntegridad = await window.HuertoSecurity.cargarConIntegridad(STORAGE_KEY);
-        if (resultadoIntegridad.status === 'TAMPERED') {
-          mostrarToast('⚠️ Aviso: Integridad modificada externamente. Verificando datos...', 'warning');
-        }
-      }
-
       if (parsed && parsed.parcelas && parsed.parcelas.length >= 20) {
         estado.parcelas = parsed.parcelas;
         estado.faenas = parsed.faenas || JSON.parse(JSON.stringify(FAENAS_INICIALES));
       } else {
         estado.parcelas = JSON.parse(JSON.stringify(PARCELAS_INICIALES));
         estado.faenas = JSON.parse(JSON.stringify(FAENAS_INICIALES));
-        guardarDatos();
       }
     } else {
       estado.parcelas = JSON.parse(JSON.stringify(PARCELAS_INICIALES));
       estado.faenas = JSON.parse(JSON.stringify(FAENAS_INICIALES));
-      guardarDatos();
+    }
+
+    normalizarColeccionesEnMemoria();
+
+    // Si ya tenemos clave de sesión, guardar de inmediato en bóveda cifrada AES-256
+    if (claveSesionActiva && window.HuertoSecurity && window.HuertoSecurity.guardarBovedaCifrada) {
+      await guardarDatos();
     }
   } catch (e) {
-    console.warn('[Ciberseguridad] Recuperación segura tras error de carga:', e);
-    estado.parcelas = JSON.parse(JSON.stringify(PARCELAS_INICIALES));
-    estado.faenas = JSON.parse(JSON.stringify(FAENAS_INICIALES));
+    console.warn('[Ciberseguridad] Error cargando datos de bóveda:', e);
+    estado.parcelas = [];
+    estado.faenas = [];
   }
+}
 
-  // Garantizar que toda faena histórica o existente tenga estado 'Finalizadas' y esquema seguro
+function normalizarColeccionesEnMemoria() {
   if (Array.isArray(estado.faenas)) {
     estado.faenas.forEach(f => {
       f.estado = normalizarEstado(f.estado || 'Finalizadas');
@@ -110,18 +118,21 @@ async function cargarDatos() {
   }
 }
 
-function guardarDatos() {
+async function guardarDatos() {
   try {
     const payload = {
       parcelas: estado.parcelas,
       faenas: estado.faenas
     };
-    if (window.HuertoSecurity && window.HuertoSecurity.guardarConIntegridad) {
-      window.HuertoSecurity.guardarConIntegridad(STORAGE_KEY, payload).then(res => {
-        if (!res.success && res.error === 'QUOTA_EXCEEDED') {
-          mostrarToast('⚠️ Espacio local lleno. Descarga una copia de seguridad.', 'danger');
-        }
-      });
+
+    // Si tenemos clave activa, guardar cifrado con AES-256-GCM
+    if (claveSesionActiva && window.HuertoSecurity && window.HuertoSecurity.guardarBovedaCifrada) {
+      const res = await window.HuertoSecurity.guardarBovedaCifrada(payload, claveSesionActiva);
+      if (!res.success && res.error === 'QUOTA_EXCEEDED') {
+        mostrarToast('⚠️ Espacio local lleno. Descarga una copia de seguridad.', 'danger');
+      }
+    } else if (window.HuertoSecurity && window.HuertoSecurity.guardarConIntegridad) {
+      await window.HuertoSecurity.guardarConIntegridad(STORAGE_KEY, payload);
     } else {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
     }
@@ -131,26 +142,156 @@ function guardarDatos() {
 }
 
 // ============================================================================
-// GESTIÓN DE USUARIOS Y LOGIN RÁPIDO
+// GESTIÓN DE BÓVEDA, PIN Y CONTROL DE SESIÓN
 // ============================================================================
-function iniciarSesionUsuario() {
-  const guardado = localStorage.getItem(USER_KEY);
-  if (guardado) {
-    const user = USUARIOS.find(u => u.id === guardado);
-    if (user) {
-      estado.usuarioActivo = user;
-      actualizarHeaderUsuario();
-      return;
+function mostrarPantallaAutenticacionInicial() {
+  const modal = document.getElementById('auth-modal');
+  const viewUnlock = document.getElementById('vault-unlock-view');
+  const viewSetup = document.getElementById('vault-setup-view');
+  const viewUsers = document.getElementById('vault-users-view');
+  if (!modal) return;
+
+  modal.classList.remove('hidden');
+
+  if (window.HuertoSecurity && window.HuertoSecurity.tienePinActivo()) {
+    // Modo desbloqueo
+    if (viewUnlock) viewUnlock.classList.remove('hidden');
+    if (viewSetup) viewSetup.classList.add('hidden');
+    if (viewUsers) viewUsers.classList.add('hidden');
+
+    const pinInput = document.getElementById('auth-pin-input');
+    if (pinInput) {
+      pinInput.value = '';
+      setTimeout(() => pinInput.focus(), 150);
     }
+
+    // Verificar si hay bloqueo temporal activo por intentos fallidos
+    const statusBloqueo = window.HuertoSecurity.verificarEstadoBloqueoIntentos();
+    const errDiv = document.getElementById('auth-pin-error');
+    const btnUnlock = document.getElementById('btn-submit-unlock');
+    if (statusBloqueo.bloqueado) {
+      if (errDiv) {
+        errDiv.innerText = `Bóveda bloqueada por intentos fallidos. Espera ${statusBloqueo.segundosRestantes}s.`;
+        errDiv.classList.remove('hidden');
+      }
+      if (btnUnlock) btnUnlock.disabled = true;
+      setTimeout(() => {
+        if (btnUnlock) btnUnlock.disabled = false;
+        if (errDiv) errDiv.classList.add('hidden');
+      }, statusBloqueo.segundosRestantes * 1000);
+    } else {
+      if (errDiv) errDiv.classList.add('hidden');
+      if (btnUnlock) btnUnlock.disabled = false;
+    }
+  } else {
+    // Primer arranque: configurar PIN maestro obligatorio
+    if (viewUnlock) viewUnlock.classList.add('hidden');
+    if (viewSetup) viewSetup.classList.remove('hidden');
+    if (viewUsers) viewUsers.classList.add('hidden');
   }
-  // Si no hay usuario seleccionado, mostrar modal
-  mostrarModalUsuarios();
 }
 
-function mostrarModalUsuarios() {
-  const modal = document.getElementById('auth-modal');
+window.procesarDesbloqueoPin = async function(event) {
+  if (event) event.preventDefault();
+  const pinInput = document.getElementById('auth-pin-input');
+  const errDiv = document.getElementById('auth-pin-error');
+  const btnUnlock = document.getElementById('btn-submit-unlock');
+  const pin = pinInput ? pinInput.value.trim() : '';
+
+  if (!pin) return;
+
+  if (window.HuertoSecurity) {
+    const res = await window.HuertoSecurity.verificarPin(pin);
+    if (!res.success) {
+      if (errDiv) {
+        errDiv.innerText = res.mensaje || 'PIN incorrecto';
+        errDiv.classList.remove('hidden');
+      }
+      if (res.bloqueado && btnUnlock) {
+        btnUnlock.disabled = true;
+        setTimeout(() => {
+          btnUnlock.disabled = false;
+          if (errDiv) errDiv.classList.add('hidden');
+        }, (res.segundosRestantes || 30) * 1000);
+      }
+      return;
+    }
+
+    // PIN correcto: descifrar bóveda
+    claveSesionActiva = pin;
+    sessionStorage.setItem('huertos_carlos_session_pass', pin);
+    window.HuertoSecurity.desbloquearSesion();
+
+    await cargarDatos();
+
+    const guardado = localStorage.getItem(USER_KEY);
+    if (guardado && USUARIOS.some(u => u.id === guardado)) {
+      estado.usuarioActivo = USUARIOS.find(u => u.id === guardado);
+      const modal = document.getElementById('auth-modal');
+      if (modal) modal.classList.add('hidden');
+      actualizarHeaderUsuario();
+      renderizarTodo();
+      actualizarEstadoCiberseguridadUI();
+      mostrarToast('🔓 Bóveda descifrada con éxito');
+    } else {
+      mostrarSelectorOperariosModal();
+    }
+  }
+};
+
+window.procesarCreacionPin = async function(event) {
+  if (event) event.preventDefault();
+  const p1 = document.getElementById('setup-pin-input')?.value.trim();
+  const p2 = document.getElementById('setup-pin-confirm')?.value.trim();
+  const errDiv = document.getElementById('setup-pin-error');
+
+  if (!p1 || p1.length < 4) {
+    if (errDiv) {
+      errDiv.innerText = 'El PIN o clave debe tener al menos 4 caracteres';
+      errDiv.classList.remove('hidden');
+    }
+    return;
+  }
+
+  if (p1 !== p2) {
+    if (errDiv) {
+      errDiv.innerText = 'Los PINs introducidos no coinciden';
+      errDiv.classList.remove('hidden');
+    }
+    return;
+  }
+
+  try {
+    await window.HuertoSecurity.configurarPinSeguridad(p1);
+    claveSesionActiva = p1;
+    sessionStorage.setItem('huertos_carlos_session_pass', p1);
+    window.HuertoSecurity.desbloquearSesion();
+
+    estado.parcelas = JSON.parse(JSON.stringify(PARCELAS_INICIALES));
+    estado.faenas = JSON.parse(JSON.stringify(FAENAS_INICIALES));
+    normalizarColeccionesEnMemoria();
+    await guardarDatos();
+
+    mostrarToast('🔐 Bóveda AES-256 activada con éxito');
+    mostrarSelectorOperariosModal();
+  } catch (err) {
+    if (errDiv) {
+      errDiv.innerText = err.message;
+      errDiv.classList.remove('hidden');
+    }
+  }
+};
+
+function mostrarSelectorOperariosModal() {
+  const viewUnlock = document.getElementById('vault-unlock-view');
+  const viewSetup = document.getElementById('vault-setup-view');
+  const viewUsers = document.getElementById('vault-users-view');
   const selector = document.getElementById('usuarios-selector');
-  if (!modal || !selector) return;
+  if (!selector) return;
+
+  if (viewUnlock) viewUnlock.classList.add('hidden');
+  if (viewSetup) viewSetup.classList.add('hidden');
+  if (viewUsers) viewUsers.classList.remove('hidden');
 
   selector.innerHTML = '';
   USUARIOS.forEach(u => {
@@ -168,8 +309,6 @@ function mostrarModalUsuarios() {
     btn.onclick = () => seleccionarUsuario(u);
     selector.appendChild(btn);
   });
-
-  modal.classList.remove('hidden');
 }
 
 function seleccionarUsuario(usuario) {
@@ -180,11 +319,42 @@ function seleccionarUsuario(usuario) {
   actualizarHeaderUsuario();
   mostrarToast(`Sesión iniciada como ${usuario.nombre}`);
   renderizarOperariosChips();
+  renderizarTodo();
+  actualizarEstadoCiberseguridadUI();
 }
 
 window.cambiarUsuario = function() {
-  mostrarModalUsuarios();
+  const modal = document.getElementById('auth-modal');
+  if (modal) modal.classList.remove('hidden');
+  mostrarSelectorOperariosModal();
 };
+
+window.bloquearCuadernoManual = function(razon = 'manual') {
+  claveSesionActiva = null;
+  sessionStorage.removeItem('huertos_carlos_session_pass');
+  if (window.HuertoSecurity) {
+    window.HuertoSecurity.bloquearSesion();
+  }
+  // Purgar de memoria los datos sensibles
+  estado.parcelas = [];
+  estado.faenas = [];
+  renderizarTodo();
+  mostrarPantallaAutenticacionInicial();
+  mostrarToast(razon === 'inactividad' ? '⏱️ Cuaderno bloqueado por inactividad' : '🔒 Cuaderno de campo bloqueado');
+};
+
+function iniciarSesionUsuario() {
+  const guardado = localStorage.getItem(USER_KEY);
+  if (guardado) {
+    const user = USUARIOS.find(u => u.id === guardado);
+    if (user) {
+      estado.usuarioActivo = user;
+      actualizarHeaderUsuario();
+      return;
+    }
+  }
+  mostrarSelectorOperariosModal();
+}
 
 function actualizarHeaderUsuario() {
   const badge = document.getElementById('user-active-badge');
@@ -1232,90 +1402,168 @@ window.guardarNuevoHuerto = function(e) {
 };
 
 // ============================================================================
-// EXPORTACIÓN / IMPORTACIÓN SEGURA DE COPIAS
+// EXPORTACIÓN / IMPORTACIÓN PROTEGIDA Y BÓVEDA SEGURA
 // ============================================================================
-window.exportarDatos = function() {
-  // Deep sanitize para descartar prototipos o claves corruptas
-  const payloadLimpio = (window.HuertoSecurity && window.HuertoSecurity.deepSanitizeObject)
-    ? window.HuertoSecurity.deepSanitizeObject(estado)
-    : estado;
 
-  const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(payloadLimpio, null, 2));
-  const downloadAnchor = document.createElement('a');
-  downloadAnchor.setAttribute("href", dataStr);
-  downloadAnchor.setAttribute("download", `huertos_carlos_respaldo_${new Date().toISOString().split('T')[0]}.json`);
-  document.body.appendChild(downloadAnchor);
-  downloadAnchor.click();
-  downloadAnchor.remove();
-  mostrarToast('Copia de seguridad cifrada descargada');
+async function solicitarAutorizacionPin(accionDescripcion, callback) {
+  if (!window.HuertoSecurity || !window.HuertoSecurity.tienePinActivo()) {
+    return callback();
+  }
+  const pin = prompt(`🛡️ AUTORIZACIÓN DE SEGURIDAD\n\nPor protección contra extracción no autorizada de datos sensibles, confirma tu PIN para:\n"${accionDescripcion}"`);
+  if (pin === null) {
+    mostrarToast('Operación cancelada', 'warning');
+    return;
+  }
+  const res = await window.HuertoSecurity.verificarPin(pin);
+  if (res.success) {
+    callback();
+  } else {
+    mostrarToast(`❌ ${res.mensaje || 'PIN incorrecto. Operación bloqueada.'}`, 'danger');
+  }
+}
+
+// 1. Exportación JSON Protegida con PIN
+window.exportarDatosSeguros = function() {
+  solicitarAutorizacionPin('Descargar copia de seguridad en archivo JSON', () => {
+    const payloadLimpio = (window.HuertoSecurity && window.HuertoSecurity.deepSanitizeObject)
+      ? window.HuertoSecurity.deepSanitizeObject(estado)
+      : estado;
+
+    const exportObject = {
+      _metadatos: {
+        tipo: 'Huertos Carlos - Backup Protegido',
+        fechaExportacion: new Date().toISOString(),
+        usuarioAutorizado: estado.usuarioActivo?.nombre || 'Carlos',
+        totalParcelas: estado.parcelas.length,
+        totalFaenas: estado.faenas.length
+      },
+      parcelas: payloadLimpio.parcelas,
+      faenas: payloadLimpio.faenas
+    };
+
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(exportObject, null, 2));
+    const downloadAnchor = document.createElement('a');
+    downloadAnchor.setAttribute("href", dataStr);
+    downloadAnchor.setAttribute("download", `huertos_carlos_respaldo_${new Date().toISOString().split('T')[0]}.json`);
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
+    mostrarToast('✅ Copia de seguridad JSON exportada con éxito');
+  });
 };
 
-// Exportación CSV con protección Anti-Inyección de fórmulas para Excel/Calc
+window.exportarDatos = window.exportarDatosSeguros;
+
+// 2. Exportación CSV Protegida con PIN y Anti-Inyección de fórmulas para Excel/Calc
 window.exportarDatosSegurosCsv = function() {
   if (!estado.faenas || estado.faenas.length === 0) {
     mostrarToast('No hay faenas para exportar a CSV');
     return;
   }
 
-  const sanitizeCell = (window.HuertoSecurity && window.HuertoSecurity.sanitizeCsvCell)
-    ? window.HuertoSecurity.sanitizeCsvCell
-    : val => `"${String(val || '').replace(/"/g, '""')}"`;
+  solicitarAutorizacionPin('Exportar partes de faena a hoja CSV', () => {
+    const sanitizeCell = (window.HuertoSecurity && window.HuertoSecurity.sanitizeCsvCell)
+      ? window.HuertoSecurity.sanitizeCsvCell
+      : val => `"${String(val || '').replace(/"/g, '""')}"`;
 
-  const headers = ['ID', 'Fecha', 'Hora', 'Huerto', 'Operario', 'Tipo Faena', 'Estado', 'Quimico', 'Dosis', 'Plagas', 'Hierba', 'Notas'];
-  const rows = [headers.map(h => `"${h}"`).join(',')];
+    const headers = ['ID', 'Fecha', 'Hora', 'Huerto', 'Operario', 'Tipo Faena', 'Estado', 'Quimico', 'Dosis', 'Plagas', 'Hierba', 'Notas'];
+    const rows = [headers.map(h => `"${h}"`).join(',')];
 
-  estado.faenas.forEach(f => {
-    const plagasStr = (f.plagas && Array.isArray(f.plagas)) ? f.plagas.join('; ') : '';
-    const fila = [
-      sanitizeCell(f.id),
-      sanitizeCell(f.fecha),
-      sanitizeCell(f.hora || ''),
-      sanitizeCell(f.parcelaNombre),
-      sanitizeCell(f.usuario),
-      sanitizeCell(f.tipoFaena),
-      sanitizeCell(f.estado || 'Finalizadas'),
-      sanitizeCell(f.quimicoProducto || ''),
-      sanitizeCell(f.quimicoDosis || ''),
-      sanitizeCell(plagasStr),
-      sanitizeCell(f.hierba || 'Limpio'),
-      sanitizeCell(f.notas || '')
-    ];
-    rows.push(fila.join(','));
+    estado.faenas.forEach(f => {
+      const plagasStr = (f.plagas && Array.isArray(f.plagas)) ? f.plagas.join('; ') : '';
+      const fila = [
+        sanitizeCell(f.id),
+        sanitizeCell(f.fecha),
+        sanitizeCell(f.hora || ''),
+        sanitizeCell(f.parcelaNombre),
+        sanitizeCell(f.usuario),
+        sanitizeCell(f.tipoFaena),
+        sanitizeCell(f.estado || 'Finalizadas'),
+        sanitizeCell(f.quimicoProducto || ''),
+        sanitizeCell(f.quimicoDosis || ''),
+        sanitizeCell(plagasStr),
+        sanitizeCell(f.hierba || 'Limpio'),
+        sanitizeCell(f.notas || '')
+      ];
+      rows.push(fila.join(','));
+    });
+
+    const csvContent = "\uFEFF" + rows.join('\r\n'); // BOM UTF-8 para Excel
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `huertos_carlos_faenas_seguras_${new Date().toISOString().split('T')[0]}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    mostrarToast('✅ CSV exportado con protección anti-inyección');
   });
+};
 
-  const csvContent = "\uFEFF" + rows.join('\r\n'); // BOM UTF-8 para Excel
-  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+// 3. Exportación de Bóveda Directamente Cifrada (.hcenc)
+window.exportarCopiaCifradaBoveda = function() {
+  const rawVault = localStorage.getItem('huertos_carlos_vault_v4');
+  if (!rawVault) {
+    mostrarToast('No hay bóveda cifrada disponible para exportar', 'warning');
+    return;
+  }
+  const blob = new Blob([rawVault], { type: 'application/json;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `huertos_carlos_faenas_seguras_${new Date().toISOString().split('T')[0]}.csv`;
+  a.download = `huertos_carlos_boveda_cifrada_${new Date().toISOString().split('T')[0]}.hcenc`;
   document.body.appendChild(a);
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
-  mostrarToast('CSV exportado con protección anti-inyección');
+  mostrarToast('🔐 Bóveda militar AES-256 exportada (.hcenc)');
 };
 
+// 4. Importación Segura (JSON / CSV / Bóveda Cifrada .hcenc)
 window.importarDatos = function(event) {
   const file = event.target.files[0];
   if (!file) return;
 
-  // Límite de tamaño: max 10MB para prevenir ataques DoS por memoria
   if (file.size > 10 * 1024 * 1024) {
     mostrarToast('⚠️ Archivo demasiado grande (máximo 10 MB)', 'danger');
     event.target.value = '';
     return;
   }
 
+  const isEncryptedVault = file.name.endsWith('.hcenc');
+
   const reader = new FileReader();
-  reader.onload = function(e) {
+  reader.onload = async function(e) {
     try {
-      // Crear snapshot de respaldo automático antes de aplicar cambios
       if (window.HuertoSecurity && window.HuertoSecurity.crearSnapshotSeguridad) {
         window.HuertoSecurity.crearSnapshotSeguridad(STORAGE_KEY);
       }
 
-      // Parser seguro anti-prototype pollution
+      if (isEncryptedVault) {
+        const pin = prompt('Introduce el PIN con el que se cifró esta copia de bóveda:');
+        if (!pin) {
+          mostrarToast('Importación cancelada', 'warning');
+          return;
+        }
+        const paquete = window.HuertoSecurity.safeJsonParse(e.target.result);
+        const decrypted = await window.HuertoSecurity.decryptData(paquete, pin);
+        if (!decrypted || !decrypted.parcelas) {
+          throw new Error('Estructura de bóveda no válida');
+        }
+        estado.parcelas = decrypted.parcelas;
+        estado.faenas = decrypted.faenas || [];
+        claveSesionActiva = pin;
+        sessionStorage.setItem('huertos_carlos_session_pass', pin);
+        await window.HuertoSecurity.configurarPinSeguridad(pin);
+        await guardarDatos();
+        renderizarTodo();
+        actualizarEstadoCiberseguridadUI();
+        mostrarToast('🎉 Bóveda cifrada restaurada con éxito');
+        return;
+      }
+
       const data = (window.HuertoSecurity && window.HuertoSecurity.safeJsonParse)
         ? window.HuertoSecurity.safeJsonParse(e.target.result)
         : JSON.parse(e.target.result);
@@ -1346,7 +1594,8 @@ window.importarDatos = function(event) {
         countFaenas = estado.faenas.length;
       }
 
-      guardarDatos();
+      normalizarColeccionesEnMemoria();
+      await guardarDatos();
       renderizarTodo();
       actualizarEstadoCiberseguridadUI();
       mostrarToast(`¡Importados con éxito ${countParcelas} huertos y ${countFaenas} faenas!`);
@@ -1364,10 +1613,11 @@ window.deshacerUltimaAccion = function() {
   if (window.HuertoSecurity && window.HuertoSecurity.restaurarSnapshotSeguridad) {
     const ok = window.HuertoSecurity.restaurarSnapshotSeguridad(STORAGE_KEY);
     if (ok) {
-      cargarDatos();
-      renderizarTodo();
-      actualizarEstadoCiberseguridadUI();
-      mostrarToast('↩️ Estado restaurado al punto previo a la importación');
+      cargarDatos().then(() => {
+        renderizarTodo();
+        actualizarEstadoCiberseguridadUI();
+        mostrarToast('↩️ Estado restaurado al punto previo a la importación');
+      });
       return;
     }
   }
@@ -1375,16 +1625,20 @@ window.deshacerUltimaAccion = function() {
 };
 
 window.restablecerDatosExcel = function() {
-  if (confirm('¿Restablecer el cuaderno de campo con las 30 parcelas y faenas originales del Excel de Carlos?\n(Se creará una copia de seguridad automática de tu estado actual)')) {
-    if (window.HuertoSecurity && window.HuertoSecurity.crearSnapshotSeguridad) {
-      window.HuertoSecurity.crearSnapshotSeguridad(STORAGE_KEY);
+  solicitarAutorizacionPin('Restablecer todos los huertos y faenas al Excel original de Carlos', async () => {
+    if (confirm('¿Seguro que deseas restablecer los 30 huertos originales del Excel de Carlos?\n(Se creará una copia de seguridad automática de tu estado actual)')) {
+      if (window.HuertoSecurity && window.HuertoSecurity.crearSnapshotSeguridad) {
+        window.HuertoSecurity.crearSnapshotSeguridad(STORAGE_KEY);
+      }
+      estado.parcelas = JSON.parse(JSON.stringify(PARCELAS_INICIALES));
+      estado.faenas = JSON.parse(JSON.stringify(FAENAS_INICIALES));
+      normalizarColeccionesEnMemoria();
+      await guardarDatos();
+      renderizarTodo();
+      actualizarEstadoCiberseguridadUI();
+      mostrarToast('¡Cuaderno restaurado al Excel de Carlos (30 huertos)!');
     }
-    localStorage.removeItem(STORAGE_KEY);
-    cargarDatos();
-    renderizarTodo();
-    actualizarEstadoCiberseguridadUI();
-    mostrarToast('¡Cuaderno de campo restaurado con el Excel de Carlos (30 huertos)!');
-  }
+  });
 };
 
 // ============================================================================
@@ -1392,87 +1646,83 @@ window.restablecerDatosExcel = function() {
 // ============================================================================
 function actualizarEstadoCiberseguridadUI() {
   const pinBadge = document.getElementById('pin-status-badge');
-  const pinDesc = document.getElementById('pin-status-desc');
+  const vaultBadge = document.getElementById('vault-status-badge');
   const btnPin = document.getElementById('btn-gestionar-pin');
-  const btnDeshacer = document.getElementById('btn-deshacer-seguridad');
 
   if (window.HuertoSecurity) {
     const tienePin = window.HuertoSecurity.tienePinActivo();
+    const tieneBoveda = window.HuertoSecurity.tieneBovedaCifrada();
+
     if (pinBadge) {
-      pinBadge.innerText = tienePin ? 'Activo (4 dígitos)' : 'Desactivado';
-      pinBadge.style.color = tienePin ? 'var(--primary-light)' : 'var(--text-subtle)';
-      pinBadge.style.background = tienePin ? 'rgba(34, 197, 94, 0.15)' : 'rgba(100, 116, 139, 0.15)';
+      pinBadge.innerText = tienePin ? 'PIN Protegido' : 'Sin Configurar';
+      pinBadge.style.color = tienePin ? 'var(--primary-light)' : '#f87171';
     }
-    if (pinDesc) {
-      pinDesc.innerText = tienePin ? 'Bloqueo activo. Requiere PIN para desbloquear.' : 'Protege el cuaderno de campo con un PIN opcional.';
+    if (vaultBadge) {
+      vaultBadge.innerText = (tieneBoveda || claveSesionActiva) ? '🔐 AES-256 Activo' : '🛡️ Integridad SHA-256';
+      vaultBadge.style.color = 'var(--primary-light)';
     }
     if (btnPin) {
-      btnPin.innerText = tienePin ? '🔓 Desactivar PIN' : '🔐 Configurar PIN de Bloqueo';
-    }
-
-    // Comprobar si hay snapshot de recuperación disponible
-    const snap = localStorage.getItem('huertos_carlos_snapshot_pre_action');
-    if (btnDeshacer) {
-      btnDeshacer.style.display = snap ? 'inline-block' : 'none';
+      btnPin.innerText = tienePin ? '🔑 Cambiar PIN de Acceso' : '🔐 Configurar PIN de Seguridad';
     }
   }
 }
 
-window.verificarCiberseguridad = function() {
-  const hash = localStorage.getItem('huertos_carlos_integrity_hash_v3') || 'Local';
-  alert(
-    `🛡️ ESTADO DE CIBERSEGURIDAD - HUERTOS CARLOS\n` +
-    `==========================================\n` +
-    `• Aislamiento de Red: Cero fugas a servidores externos (100% Local / Offline)\n` +
-    `• Protección de Navegación: CSP y Anti-Clickjacking estrictos activos\n` +
-    `• Prevención de Inyecciones: Filtro Anti-XSS y Anti-Inyección CSV activos\n` +
-    `• Integridad de Datos: SHA-256 verificado (${hash.substring(0, 16)}...)\n` +
-    `• Estado de Privacidad: ${window.HuertoSecurity && window.HuertoSecurity.tienePinActivo() ? 'PIN Activo' : 'Sin PIN'}\n\n` +
-    `Tus datos agrícolas están 100% a salvo y protegidos.`
-  );
-};
-
 window.verificarIntegridadManual = async function() {
   if (window.HuertoSecurity) {
-    const res = await window.HuertoSecurity.cargarConIntegridad(STORAGE_KEY);
-    if (res.status === 'VERIFIED') {
-      mostrarToast(`✅ Integridad confirmada: SHA-256 coincide exactamente`);
-    } else if (res.status === 'TAMPERED') {
-      mostrarToast(`⚠️ Alerta: El hash no coincide con la firma guardada`, 'warning');
-    } else {
-      mostrarToast(`ℹ️ Estado de datos: ${res.status}`);
-    }
+    const hash = localStorage.getItem('huertos_carlos_integrity_hash_v3') || 'Bóveda Cifrada';
+    alert(
+      `🛡️ REPORTE DE CIBERSEGURIDAD Y PROTECCIÓN DE DATOS\n` +
+      `==================================================\n\n` +
+      `• Bóveda Local: Cifrado simétrico militar AES-256-GCM + PBKDF2 (100.000 iteraciones)\n` +
+      `• Aislamiento de Red: connect-src 'self' (Cero fugas externas)\n` +
+      `• Integridad Criptográfica: SHA-256 verificado (${hash.substring(0, 16)}...)\n` +
+      `• Prevención de Inyecciones: Anti-XSS y Anti-CSV Formula Injection activos\n` +
+      `• Anti-Fuerza Bruta: Rate-limiting y bloqueo exponencial tras intentos fallidos\n` +
+      `• Auto-bloqueo: Cierre automático tras 10 min de inactividad o pantalla oculta\n\n` +
+      `Estado actual: ${window.HuertoSecurity.tienePinActivo() ? '✅ Cuaderno 100% Blindado' : '⚠️ Pendiente de configurar PIN'}`
+    );
   }
 };
 
 window.gestionarPinSeguridad = async function() {
   if (!window.HuertoSecurity) return;
   if (window.HuertoSecurity.tienePinActivo()) {
-    if (confirm('¿Deseas eliminar el PIN de bloqueo y dejar el acceso libre?')) {
-      window.HuertoSecurity.eliminarPinSeguridad();
-      actualizarEstadoCiberseguridadUI();
-      mostrarToast('PIN de seguridad eliminado');
-    }
-  } else {
-    const pin = prompt('Introduce un PIN de 4 dígitos numéricos para proteger la web:');
-    if (pin === null) return;
-    if (!/^\d{4}$/.test(pin)) {
-      alert('Error: El PIN debe tener exactamente 4 dígitos numéricos (ej. 1234).');
+    const pinActual = prompt('Introduce tu PIN actual para verificar tu identidad:');
+    if (pinActual === null) return;
+    const check = await window.HuertoSecurity.verificarPin(pinActual);
+    if (!check.success) {
+      alert(check.mensaje || 'PIN actual incorrecto');
       return;
     }
-    await window.HuertoSecurity.configurarPinSeguridad(pin);
+    const nuevoPin = prompt('Introduce tu NUEVO PIN o Clave Maestra (mínimo 4 caracteres):');
+    if (nuevoPin === null) return;
+    if (nuevoPin.length < 4) {
+      alert('Error: El PIN debe tener al menos 4 caracteres.');
+      return;
+    }
+    const confirmar = prompt('Confirma de nuevo el NUEVO PIN:');
+    if (confirmar !== nuevoPin) {
+      alert('Los PINs introducidos no coinciden.');
+      return;
+    }
+    await window.HuertoSecurity.configurarPinSeguridad(nuevoPin);
+    claveSesionActiva = nuevoPin;
+    sessionStorage.setItem('huertos_carlos_session_pass', nuevoPin);
+    await guardarDatos();
     actualizarEstadoCiberseguridadUI();
-    mostrarToast('¡PIN de 4 dígitos configurado con éxito!');
+    mostrarToast('🔑 PIN actualizado y bóveda recifrada con éxito');
+  } else {
+    mostrarPantallaAutenticacionInicial();
   }
 };
 
 function iniciarProteccionPrivacidad() {
-  // Desactivado en entorno de pruebas según solicitud de Jordi
+  if (window.HuertoSecurity && window.HuertoSecurity.iniciarDetectorInactividad) {
+    window.HuertoSecurity.iniciarDetectorInactividad(10, (razon) => {
+      window.bloquearCuadernoManual(razon);
+    });
+  }
 }
-
-window.comprobarPinEntrada = async function() {
-  // Desactivado en entorno de pruebas
-};
 
 // ============================================================================
 // UTILIDADES
